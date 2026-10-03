@@ -4,23 +4,14 @@
 	import ArrowLeft from 'lucide-svelte/icons/arrow-left';
 	import Download from 'lucide-svelte/icons/download';
 	import Trash2 from 'lucide-svelte/icons/trash-2';
-	import Check from 'lucide-svelte/icons/check';
-	import X from 'lucide-svelte/icons/x';
 	import type { Profile } from '$lib/storage/types';
 	import { getStorage } from '$lib/storage';
 	import { getSession } from '$lib/auth/session';
-	import { getLLMConfig, setLLMConfig, defaultLLMConfig, type LLMConfig } from '$lib/llm/config';
-	import { testConnection } from '$lib/llm/client';
-	import { getSessionUser } from '$lib/auth/supabase';
 	import { toast } from '$lib/stores/toast';
 	import { seedPersona, PERSONAS } from '../../../dev-fixtures/personas';
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	let profile = $state<Profile | null>(null);
-	let cfg = $state<LLMConfig>(defaultLLMConfig());
-	let connState = $state<'unknown' | 'testing' | 'ok' | 'fail'>('unknown');
-	let connDetail = $state('');
-	let signedInSupabase = $state<boolean | null>(null);
 
 	// destructive actions need an explicit go-ahead, and must not be re-enterable while running
 	let seeding = $state<string | null>(null);
@@ -37,10 +28,6 @@
 			return;
 		}
 		profile = await getStorage().getProfile(session.userId);
-		cfg = getLLMConfig();
-		const user = await getSessionUser();
-		signedInSupabase = user !== null;
-		if (session.mode === 'local') signedInSupabase = false;
 	});
 
 	async function saveProfile(): Promise<void> {
@@ -49,28 +36,6 @@
 		const { id: _id, created_at: _c, ...input } = profile;
 		await getStorage().saveProfile(session.userId, input);
 		toast('profile saved');
-	}
-
-	function updateCfg<K extends keyof LLMConfig>(key: K, value: LLMConfig[K]): void {
-		cfg = { ...cfg, [key]: value };
-		setLLMConfig(cfg);
-		connState = 'unknown';
-		connDetail = '';
-	}
-
-	async function checkConn(): Promise<void> {
-		connState = 'testing';
-		connDetail = 'asking the server...';
-		const res = await testConnection(cfg, (await getSessionUserToken()) ?? undefined);
-		connState = res.ok ? 'ok' : 'fail';
-		connDetail = res.detail;
-	}
-
-	async function getSessionUserToken(): Promise<string | null> {
-		const supabase = (await import('$lib/auth/supabase')).getSupabase();
-		if (!supabase) return null;
-		const { data } = await supabase.auth.getSession();
-		return data.session?.access_token ?? null;
 	}
 
 	function exportData(): void {
@@ -169,40 +134,6 @@
 	{:else}
 		<p class="text-sm font-bold text-mute">loading profile...</p>
 	{/if}
-
-	<section class="card p-5 space-y-4">
-		<h2 class="font-black uppercase text-sm tracking-widest text-brown">the brain (open weights)</h2>
-		<p class="text-xs font-semibold text-mute leading-relaxed">
-			hosted: anonymized context goes to the Supabase proxy, which forwards to an open-weight model on NVIDIA NIM. nothing identifying ever leaves.
-		</p>
-		<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-			<label class="text-xs font-black uppercase tracking-widest text-brown space-y-1">base url
-				<input class="field" value={cfg.url} oninput={(e) => updateCfg('url', e.currentTarget.value)} />
-			</label>
-			<label class="text-xs font-black uppercase tracking-widest text-brown space-y-1">model
-				<input class="field" value={cfg.model} oninput={(e) => updateCfg('model', e.currentTarget.value)} />
-			</label>
-			<div class="flex items-end gap-2">
-				<button type="button" class="btn !rounded-xl px-4 py-2 text-xs" onclick={() => void checkConn()}>check connection</button>
-				{#if connState === 'testing'}<span class="text-xs font-bold text-mute">testing...</span>
-				{:else if connState === 'ok'}<span class="chip !bg-lime !py-0.5"><Check class="w-3 h-3" /> reachable</span>
-				{:else if connState === 'fail'}<span class="chip !bg-yellow !py-0.5"><X class="w-3 h-3" /> not reachable</span>
-				{/if}
-			</div>
-		</div>
-		{#if connDetail}
-			<p class="text-xs font-semibold leading-relaxed {connState === 'ok' ? 'text-mute' : 'text-brown'}">{connDetail}</p>
-		{/if}
-		{#if signedInSupabase === false}
-			<p class="text-xs font-bold text-brown leading-relaxed">
-				you checked in without an account, so there is no token for the hosted model to accept.
-				log out, then check in with email.
-			</p>
-		{/if}
-		<p class="text-[11px] font-semibold text-mute">
-			swapping models is a config change: change the model id above. same app, different brain.
-		</p>
-	</section>
 
 	<section class="card p-5 space-y-4">
 		<div class="flex items-center justify-between gap-3">
