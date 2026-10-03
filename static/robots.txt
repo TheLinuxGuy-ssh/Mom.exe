@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /settings
+Disallow: /dashboard
+
+Sitemap: https://mom-exe.vercel.app/sitemap.xml
