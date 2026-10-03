@@ -1,75 +1,76 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
 	import { DotLottieSvelte } from '@lottiefiles/dotlottie-svelte';
 
 	type Phase = 'night' | 'day';
-	type Dir = 'up' | 'down' | 'left' | 'right';
+	type Fit = 'cover' | 'contain';
 
+	type Scene = {
+		sky: string;
+		skyFit: Fit;
+		body: string;
+		lines: string[];
+	};
+
+	const SWAP_MS = 560;
+	const SAY_MS = 420;
 	const SAD_MS = 4000;
 	const HAPPY_MS = 8000;
 
-	const NIGHT_CAPTIONS = [
-		'slept at 4am? missed breakfast? mom has a plan.',
-		'the moon stole your night. mom plans the morning.'
-	];
-	const DAY_CAPTIONS = [
-		"schedule fixed. sun's back. go dance.",
-		'eat, move, sleep on time. that is the whole trick.'
-	];
+	const SCENES: Record<Phase, Scene> = {
+		night: {
+			sky: '/sadballs.lottie',
+			skyFit: 'cover',
+			body: '/catsleeping.lottie',
+			lines: ['slept at 4am? missed breakfast? mom has a plan.', 'the moon stole your night. mom plans the morning.']
+		},
+		day: {
+			sky: '/smilingsun.lottie',
+			skyFit: 'contain',
+			body: '/palmdancing.lottie',
+			lines: ["schedule fixed. sun's back. go dance.", 'eat, move, sleep on time. that is the whole trick.']
+		}
+	};
 
 	let phase = $state<Phase>('night');
 	let reduced = $state(false);
-	let caption = $state(NIGHT_CAPTIONS[0]);
-	let nightIdx = $state(0);
-	let dayIdx = $state(0);
+	let nightTurn = $state(0);
+	let dayTurn = $state(0);
+
+	const scene = $derived(SCENES[phase]);
+	const caption = $derived(
+		phase === 'night'
+			? SCENES.night.lines[nightTurn % SCENES.night.lines.length]
+			: SCENES.day.lines[dayTurn % SCENES.day.lines.length]
+	);
 
 	$effect(() => {
 		const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
 		reduced = mq.matches;
-		if (reduced) {
-			phase = 'day';
-			caption = DAY_CAPTIONS[0];
-		}
-		const onChange = (e: MediaQueryListEvent): void => {
-			reduced = e.matches;
-			if (e.matches) {
-				phase = 'day';
-				caption = DAY_CAPTIONS[0];
-			}
+		const settle = (): void => {
+			if (mq.matches) phase = 'day';
 		};
-		mq.addEventListener('change', onChange);
-		return () => mq.removeEventListener('change', onChange);
+		settle();
+		mq.addEventListener('change', settle);
+		return () => mq.removeEventListener('change', settle);
 	});
 
 	$effect(() => {
 		if (reduced) return;
-		let timer: ReturnType<typeof setTimeout>;
-		const cycle = (): void => {
-			const wait = phase === 'night' ? SAD_MS : HAPPY_MS;
-			timer = setTimeout(() => {
-				phase = phase === 'night' ? 'day' : 'night';
-				cycle();
-			}, wait);
-		};
-		cycle();
+		const timer = setTimeout(() => {
+			if (phase === 'night') {
+				nightTurn += 1;
+				phase = 'day';
+			} else {
+				dayTurn += 1;
+				phase = 'night';
+			}
+		}, phase === 'night' ? SAD_MS : HAPPY_MS);
 		return () => clearTimeout(timer);
 	});
 
-	$effect(() => {
-		const p = phase;
-		untrack(() => {
-			if (p === 'night') {
-				caption = NIGHT_CAPTIONS[nightIdx % NIGHT_CAPTIONS.length];
-				nightIdx += 1;
-			} else {
-				caption = DAY_CAPTIONS[dayIdx % DAY_CAPTIONS.length];
-				dayIdx += 1;
-			}
-		});
-	});
-
-	const EASE_OUT = cubicBezier(0.16, 1, 0.3, 1);
-	const EASE_IN = cubicBezier(0.7, 0, 0.84, 0);
+	// Near-linear and symmetric: the dissolve then advances evenly instead of
+	// flashing early and trailing off, which a front-loaded ease-out would do.
+	const EASE_SOFT = cubicBezier(0.45, 0, 0.55, 1);
 
 	function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t: number) => number {
 		const cx = 3 * x1;
@@ -95,78 +96,58 @@
 		};
 	}
 
-	function slide(node: HTMLElement, params: { dir?: Dir; duration?: number; delay?: number; out?: boolean } = {}) {
-		const { dir = 'up', duration = 450, delay = 0, out = false } = params;
-		const axis = dir === 'up' || dir === 'down' ? 'Y' : 'X';
-		const magnitude = dir === 'up' || dir === 'left' ? -110 : 110;
+	type MorphParams = { duration?: number; y?: number; scale?: number; blur?: number };
+
+	/**
+	 * One bidirectional transition drives both directions. Svelte hands `t = 1` at the resting
+	 * state and `t = 0` at the hidden state (t runs 0->1 on intro, 1->0 on outro), so the same
+	 * curve serves both. Because the incoming and outgoing layers share an easing and a duration,
+	 * their opacities stay complementary (easing(p) + 1 - easing(p) === 1) at every frame, which
+	 * is what keeps the swap seamless instead of dipping to an empty frame.
+	 */
+	function morph(node: HTMLElement, { duration = SWAP_MS, y = 18, scale = 0.96, blur = 0 }: MorphParams = {}) {
 		return {
 			duration,
-			delay,
-			easing: out ? EASE_IN : EASE_OUT,
-			css: (t: number) => `transform: translate${axis}(${(1 - t) * magnitude}%); will-change: transform;`
+			easing: EASE_SOFT,
+			css: (t: number) =>
+				`opacity:${t};` +
+				`transform:translateY(${(1 - t) * y}px) scale(${scale + (1 - scale) * t});` +
+				(blur > 0 ? `filter:blur(${(1 - t) * blur}px);` : '') +
+				'will-change:transform,opacity;'
 		};
 	}
 </script>
 
-<div class="relative mx-auto w-full max-w-lg select-none h-full flex items-end" aria-hidden="true">
-
-		<div class={`absolute right-0 top-0 h-[40%] w-[60%]`}>
-			{#if phase === 'night'}
-				<div
-					class="h-full w-full"
-					in:slide={{ dir: 'left', duration: 500 }}
-					out:slide={{ dir: 'right', duration: 380, out: true }}
-				>
-					<DotLottieSvelte src="/sadballs.lottie" autoplay loop layout={{ fit: 'cover', align: [0.5, 0.5] }} />
-				</div>
-			{:else}
-				<div
-					class="h-full w-full"
-					in:slide={{ dir: 'left', duration: 500, delay: 150 }}
-					out:slide={{ dir: 'right', duration: 380, out: true }}
-				>
-					<DotLottieSvelte src="/smilingsun.lottie" autoplay loop layout={{ fit: 'contain', align: [0.5, 0.5] }} />
-				</div>
-			{/if}
-		</div>
-	<div class="relative aspect-[5/4] w-full overflow-hidden h-[65%]">
-		<div class="absolute inset-0">
-			{#if phase === 'night'}
-				<div
-					class="h-full w-full"
-					in:slide={{ dir: 'up', duration: 500 }}
-					out:slide={{ dir: 'down', duration: 380, out: true }}
-				>
-					<DotLottieSvelte src="/catsleeping.lottie" autoplay loop layout={{ fit: 'cover', align: [0.3,0.3] }} />
-				</div>
-			{:else}
-				<div
-					class="h-full w-full"
-					in:slide={{ dir: 'up', duration: 500, delay: 150 }}
-					out:slide={{ dir: 'down', duration: 380, out: true }}
-				>
-					<DotLottieSvelte src="/palmdancing.lottie" autoplay loop layout={{ fit: 'cover', align: [0.3,0.3] }} />
-				</div>
-			{/if}
-			<div class="relative -mt-1 h-11 overflow-hidden">
-		{#if phase === 'night'}
-			<p
-				class="absolute inset-0 px-4 text-center font-hand text-[26px] font-bold leading-tight text-brown"
-				in:slide={{ dir: 'up', duration: 320, delay: 140 }}
-				out:slide={{ dir: 'down', duration: 240, out: true }}
-			>
-				{caption}
-			</p>
-		{:else}
-			<p
-				class="absolute inset-0 px-4 text-center font-hand text-[26px] font-bold leading-tight text-brown"
-				in:slide={{ dir: 'up', duration: 320, delay: 280 }}
-				out:slide={{ dir: 'down', duration: 240, out: true }}
-			>
-				{caption}
-			</p>
-		{/if}
+<div class="relative mx-auto flex h-full w-full max-w-lg select-none flex-col justify-end" aria-hidden="true">
+	<div class="pointer-events-none absolute right-0 top-0 z-20 h-[42%] w-[62%]">
+		{#key phase}
+			<div class="absolute inset-0" in:morph={{ y: 16 }} out:morph={{ y: 16 }}>
+				<DotLottieSvelte src={scene.sky} autoplay loop layout={{ fit: scene.skyFit, align: [0.5, 0.5] }} />
+			</div>
+		{/key}
 	</div>
+
+	<div class="relative min-h-0 w-full flex-1 overflow-hidden">
+		{#key phase}
+			<div class="absolute inset-0" in:morph={{ y: 22 }} out:morph={{ y: 22 }}>
+				<DotLottieSvelte src={scene.body} autoplay loop layout={{ fit: 'cover', align: [0.5, 1] }} />
+			</div>
+		{/key}
+	</div>
+
+	<div class="relative mx-auto mt-0 w-full max-w-[26rem] shrink-0 pb-1">
+		<div
+			class="sticky-note relative flex min-h-[3.5rem] w-full items-center justify-center !px-5 !py-3 !text-[clamp(1.05rem,4vw,1.375rem)] text-brown"
+		>
+			{#key phase}
+				<p
+					class="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-4 text-center !leading-[1.28]"
+					in:morph={{ duration: SAY_MS, y: 10, scale: 0.985, blur: 3 }}
+					out:morph={{ duration: SAY_MS, y: 10, scale: 0.985, blur: 3 }}
+				>
+					<span>{caption}</span>
+				</p>
+			{/key}
 		</div>
 	</div>
 </div>
