@@ -8,7 +8,7 @@
 	import type { Checkin, Plan, PlanBlock, Profile } from '$lib/storage/types';
 	import { getStorage } from '$lib/storage';
 	import { getSession, clearSession } from '$lib/auth/session';
-	import { getAuthToken, signOut as supabaseSignOut } from '$lib/auth/supabase';
+	import { getAuthToken, getSessionUser, signOut as supabaseSignOut } from '$lib/auth/supabase';
 	import { buildContext, buildTodayInfo } from '$lib/engine/context';
 	import { computeStats } from '$lib/engine/stats';
 	import {
@@ -60,8 +60,11 @@
 			goto('/login');
 			return;
 		}
+		if (session.mode === 'supabase') {
+			await getSessionUser();
+		}
 		const storage = getStorage();
-		const p = await storage.getProfile(session.userId);
+		const p = await storage.getProfile(session.userId).catch(() => null);
 		if (!p) {
 			goto('/onboarding');
 			return;

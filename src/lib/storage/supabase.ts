@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
 	Checkin,
 	CheckinInput,
@@ -13,10 +13,8 @@ import type {
 export class SupabaseStorage implements Storage {
 	private client: SupabaseClient;
 
-	constructor(url: string, anonKey: string) {
-		this.client = createClient(url, anonKey, {
-			auth: { persistSession: true, autoRefreshToken: true }
-		});
+	constructor(client: SupabaseClient) {
+		this.client = client;
 	}
 
 	async getProfile(userId: string): Promise<Profile | null> {
