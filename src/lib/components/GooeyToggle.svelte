@@ -18,9 +18,17 @@
 </script>
 
 <div class="relative {cls}">
-	<div class="absolute inset-0 overflow-hidden rounded-full pointer-events-none" style="filter: url(#gooey)">
+	<!--
+		The pill is a plain block that fills its slot edge to edge, and the caller's
+		`rounded-full overflow-hidden` container does the rounding. Giving the pill its own
+		`rounded-full` left semicircular ends inset from the border, and `filter: url(#gooey)`
+		eroded the edges further (its feGaussianBlur pulls the alpha in before feComposite),
+		so the pill never met the left/right border. The gooey filter is also pointless here:
+		it only shows when adjacent blobs merge, and there is only ever one pill.
+	-->
+	<div class="absolute inset-0 overflow-hidden rounded-full pointer-events-none">
 		<div
-			class="h-full rounded-full {indicator} transition-transform duration-200 ease-out"
+			class="h-full {indicator} transition-transform duration-200 ease-out"
 			style="width: {width}%; transform: translateX({index * 100}%)"
 		></div>
 	</div>

@@ -11,33 +11,24 @@ export interface LLMConfig {
 const LS_KEY = 'momexe:llm-config';
 
 export function defaultLLMConfig(): LLMConfig {
-	const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-	if (supabaseUrl) {
-		return {
-			mode: 'proxy',
-			url: `${supabaseUrl}/functions/v1/plan`,
-			model: import.meta.env.VITE_NIM_MODEL ?? 'openai/gpt-oss-20b',
-			apiKey: '',
-			reasoningEffort: 'low',
-			maxTokens: 1200,
-			timeoutMs: 30000
-		};
-	}
+	const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? '';
 	return {
-		mode: 'direct',
-		url: 'http://localhost:11434/v1',
-		model: 'llama3.1:8b',
+		mode: 'proxy',
+		url: supabaseUrl ? `${supabaseUrl}/functions/v1/plan` : '',
+		model: import.meta.env.VITE_NIM_MODEL ?? 'openai/gpt-oss-20b',
 		apiKey: '',
 		reasoningEffort: 'low',
 		maxTokens: 1200,
-		timeoutMs: 45000
+		timeoutMs: 30000
 	};
 }
 
 export function getLLMConfig(): LLMConfig {
 	try {
 		const raw = localStorage.getItem(LS_KEY);
-		if (raw) return { ...defaultLLMConfig(), ...(JSON.parse(raw) as Partial<LLMConfig>) };
+		// `mode` is pinned to 'proxy'. Settings no longer offers a local/direct choice, so a
+		// stale stored 'direct' must not keep silently bypassing the hosted proxy.
+		if (raw) return { ...defaultLLMConfig(), ...(JSON.parse(raw) as Partial<LLMConfig>), mode: 'proxy' };
 	} catch {
 		/* fall through to defaults */
 	}

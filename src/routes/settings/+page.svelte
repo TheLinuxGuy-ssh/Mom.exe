@@ -13,14 +13,22 @@
 	import { testConnection } from '$lib/llm/client';
 	import { getSessionUser } from '$lib/auth/supabase';
 	import { toast } from '$lib/stores/toast';
-	import GooeyToggle from '$lib/components/GooeyToggle.svelte';
 	import { seedPersona, PERSONAS } from '../../../dev-fixtures/personas';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	let profile = $state<Profile | null>(null);
 	let cfg = $state<LLMConfig>(defaultLLMConfig());
 	let connState = $state<'unknown' | 'testing' | 'ok' | 'fail'>('unknown');
 	let connDetail = $state('');
 	let signedInSupabase = $state<boolean | null>(null);
+
+	// destructive actions need an explicit go-ahead, and must not be re-enterable while running
+	let seeding = $state<string | null>(null);
+	let wiping = $state(false);
+	let askSeed = $state<string | null>(null);
+	let askWipe = $state(false);
+	let busy = $derived(seeding !== null || wiping);
+	const busyReason = $derived(seeding !== null ? 'demo data' : wiping ? 'wipe' : null);
 
 	onMount(async () => {
 		const session = getSession();
@@ -53,8 +61,7 @@
 	async function checkConn(): Promise<void> {
 		connState = 'testing';
 		connDetail = 'asking the server...';
-		const token = cfg.mode === 'proxy' ? await getSessionUserToken() : undefined;
-		const res = await testConnection(cfg, token ?? undefined);
+		const res = await testConnection(cfg, (await getSessionUserToken()) ?? undefined);
 		connState = res.ok ? 'ok' : 'fail';
 		connDetail = res.detail;
 	}
@@ -87,18 +94,33 @@
 
 	async function deleteAll(): Promise<void> {
 		const session = getSession();
-		if (!session) return;
-		await getStorage().deleteAll(session.userId);
-		toast('wiped. fresh start.');
-		goto('/onboarding');
+		if (!session || busy) return;
+		wiping = true;
+		try {
+			await getStorage().deleteAll(session.userId);
+			toast('wiped. fresh start.');
+			await goto('/onboarding');
+		} catch (err) {
+			console.error(err);
+			toast('wipe failed, nothing changed');
+			wiping = false;
+		}
 	}
 
 	async function loadPersona(key: string): Promise<void> {
 		const session = getSession();
-		if (!session) return;
-		await seedPersona(getStorage(), session.userId, key);
-		toast('demo data loaded, go ask for a plan');
-		goto('/dashboard');
+		if (!session || busy) return;
+		seeding = key;
+		try {
+			await seedPersona(getStorage(), session.userId, key);
+			toast('demo data loaded, go ask for a plan');
+			askSeed = null;
+			await goto('/dashboard');
+		} catch (err) {
+			console.error(err);
+			toast('could not load demo data');
+			seeding = null;
+		}
 	}
 
 	async function gotoOnboarding(): Promise<void> {
@@ -149,25 +171,9 @@
 	{/if}
 
 	<section class="card p-5 space-y-4">
-		<div class="flex items-center justify-between">
-			<h2 class="font-black uppercase text-sm tracking-widest text-brown">the brain (open weights)</h2>
-			<div class="w-40 border-2 border-ink rounded-full overflow-hidden bg-paper">
-				<GooeyToggle
-					options={[
-						{ value: 'proxy', label: 'hosted' },
-						{ value: 'direct', label: 'local' }
-					]}
-					value={cfg.mode}
-					onchange={(v) => updateCfg('mode', v as 'proxy' | 'direct')}
-				/>
-			</div>
-		</div>
+		<h2 class="font-black uppercase text-sm tracking-widest text-brown">the brain (open weights)</h2>
 		<p class="text-xs font-semibold text-mute leading-relaxed">
-			{#if cfg.mode === 'proxy'}
-				hosted: anonymized context goes to the Supabase proxy, which forwards to an open-weight model on NVIDIA NIM. nothing identifying ever leaves.
-			{:else}
-				local: point at Ollama on this machine (start it with `OLLAMA_ORIGINS=* ollama serve`). nothing leaves this computer.
-			{/if}
+			hosted: anonymized context goes to the Supabase proxy, which forwards to an open-weight model on NVIDIA NIM. nothing identifying ever leaves.
 		</p>
 		<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
 			<label class="text-xs font-black uppercase tracking-widest text-brown space-y-1">base url
@@ -176,11 +182,6 @@
 			<label class="text-xs font-black uppercase tracking-widest text-brown space-y-1">model
 				<input class="field" value={cfg.model} oninput={(e) => updateCfg('model', e.currentTarget.value)} />
 			</label>
-			{#if cfg.mode === 'direct'}
-				<label class="text-xs font-black uppercase tracking-widest text-brown space-y-1">api key (optional)
-					<input type="password" class="field" value={cfg.apiKey} oninput={(e) => updateCfg('apiKey', e.currentTarget.value)} />
-				</label>
-			{/if}
 			<div class="flex items-end gap-2">
 				<button type="button" class="btn !rounded-xl px-4 py-2 text-xs" onclick={() => void checkConn()}>check connection</button>
 				{#if connState === 'testing'}<span class="text-xs font-bold text-mute">testing...</span>
@@ -192,22 +193,34 @@
 		{#if connDetail}
 			<p class="text-xs font-semibold leading-relaxed {connState === 'ok' ? 'text-mute' : 'text-brown'}">{connDetail}</p>
 		{/if}
-		{#if cfg.mode === 'proxy' && signedInSupabase === false}
+		{#if signedInSupabase === false}
 			<p class="text-xs font-bold text-brown leading-relaxed">
-				you are in browser-local mode, so there is no account token for the hosted model to accept. hosted mode
-				needs one sign-in: log out, then check in with email. want to stay local? point the base url at Ollama instead.
+				you checked in without an account, so there is no token for the hosted model to accept.
+				log out, then check in with email.
 			</p>
 		{/if}
 		<p class="text-[11px] font-semibold text-mute">
-			swapping models is a config change: try llama3.1:8b, qwen2.5:7b or mistral. same app, different brain.
+			swapping models is a config change: change the model id above. same app, different brain.
 		</p>
 	</section>
 
 	<section class="card p-5 space-y-4">
-		<h2 class="font-black uppercase text-sm tracking-widest text-brown">demo data</h2>
+		<div class="flex items-center justify-between gap-3">
+			<h2 class="font-black uppercase text-sm tracking-widest text-brown">demo data</h2>
+			{#if busyReason}
+				<span class="chip !bg-yellow !py-1 !text-xs">working: {busyReason}...</span>
+			{/if}
+		</div>
 		<div class="flex flex-wrap gap-2">
 			{#each PERSONAS as p}
-				<button type="button" class="btn !rounded-xl px-4 py-2 text-xs !bg-blue/40" onclick={() => void loadPersona(p.key)}>{p.label}</button>
+				<button
+					type="button"
+					class="btn !rounded-xl px-4 py-2 text-xs !bg-blue/40"
+					disabled={busy}
+					onclick={() => (askSeed = p.key)}
+				>
+					{p.label}
+				</button>
 			{/each}
 		</div>
 		<p class="text-[11px] font-semibold text-mute">overwrites this account's check-ins with synthetic histories for testing plan quality.</p>
@@ -219,14 +232,47 @@
 			<button type="button" class="btn !rounded-xl px-4 py-2 text-xs flex items-center gap-1.5" onclick={exportData}>
 				<Download class="w-3.5 h-3.5" /> export json
 			</button>
-			<button type="button" class="btn !rounded-xl px-4 py-2 text-xs flex items-center gap-1.5 !bg-pink !text-paper" onclick={() => void deleteAll()}>
+			<button
+				type="button"
+				class="btn !rounded-xl px-4 py-2 text-xs flex items-center gap-1.5 !bg-pink !text-paper"
+				disabled={busy}
+				onclick={() => (askWipe = true)}
+			>
 				<Trash2 class="w-3.5 h-3.5" /> wipe everything
 			</button>
 		</div>
 	</section>
 
+	<ConfirmDialog
+		open={askSeed !== null}
+		title="overwrite your data?"
+		confirmLabel="overwrite"
+		busy={seeding !== null}
+		onconfirm={() => {
+			if (askSeed !== null) void loadPersona(askSeed);
+		}}
+		oncancel={() => (askSeed = null)}
+	>
+		Loading <strong>{PERSONAS.find((p) => p.key === askSeed)?.label ?? 'this persona'}</strong> replaces this
+		account's check-ins and profile with synthetic demo history. Anything you tracked here is
+		gone for good.
+	</ConfirmDialog>
+
+	<ConfirmDialog
+		open={askWipe}
+		title="wipe everything?"
+		tone="danger"
+		confirmLabel="wipe it all"
+		busy={wiping}
+		onconfirm={() => void deleteAll()}
+		oncancel={() => (askWipe = false)}
+	>
+		This deletes every check-in and plan on this account and sends you back to setup. There is no
+		undo, so export your data first if you want a copy.
+	</ConfirmDialog>
+
 	<p class="text-[11px] font-semibold text-mute text-center leading-relaxed max-w-md mx-auto">
-		Mom.exe is a wellness coach, not medical advice. hosted mode sends anonymized context (no name, email or
-		birth date) to an open-weight model; local mode keeps everything on this machine. MIT licensed.
+		Mom.exe is a wellness coach, not medical advice. anonymized context (no name, email or birth date) is
+		sent to an open-weight model. MIT licensed.
 	</p>
 </div>

@@ -43,7 +43,7 @@
 			>
 				Check in with Mom <ArrowRight class="w-4 h-4" />
 			</button>
-			<span class="text-sm font-black text-brown">no login needed in local mode</span>
+			<!-- <span class="text-sm font-black text-brown">no login needed in local mode</span> -->
 		</div>
 
 		<div class="flex flex-wrap gap-2 mt-6 text-[11px] font-extrabold uppercase tracking-wide text-ink/70">
