@@ -43,6 +43,33 @@
 			: SCENES.day.lines[dayTurn % SCENES.day.lines.length]
 	);
 
+	type Tone = 'lime' | 'blue' | 'pink';
+
+	const HL_RULES: [RegExp, Tone][] = [
+		[/\b4am\b/gi, 'lime'],
+		[/\bbreakfast\b/gi, 'pink'],
+		[/\bmoon\b/gi, 'blue'],
+		[/\bmorning\b/gi, 'lime'],
+		[/\bschedule fixed\b/gi, 'lime'],
+		[/\bdance\b/gi, 'pink'],
+		[/\bsleep on time\b/gi, 'lime'],
+		[/\bwhole trick\b/gi, 'blue']
+	];
+
+	function escapeHtml(s: string): string {
+		return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	}
+
+	function highlight(s: string): string {
+		let html = escapeHtml(s);
+		for (const [re, tone] of HL_RULES) {
+			html = html.replace(new RegExp(re.source, re.flags), `<mark class="hl hl-${tone}">$&</mark>`);
+		}
+		return html;
+	}
+
+	const captionHtml = $derived(highlight(caption));
+
 	$effect(() => {
 		const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
 		reduced = mq.matches;
@@ -119,7 +146,7 @@
 </script>
 
 <div class="relative mx-auto flex h-full w-full max-w-lg select-none flex-col justify-end" aria-hidden="true">
-	<div class="pointer-events-none absolute right-0 top-0 z-20 h-[42%] w-[62%]">
+	<div class="pointer-events-none absolute right-0 top-0 z-20 h-[40%] w-[52%]">
 		{#key phase}
 			<div class="absolute inset-0" in:morph={{ y: 16 }} out:morph={{ y: 16 }}>
 				<DotLottieSvelte src={scene.sky} autoplay loop layout={{ fit: scene.skyFit, align: [0.5, 0.5] }} />
@@ -130,24 +157,35 @@
 	<div class="relative min-h-0 w-full flex-1 overflow-hidden">
 		{#key phase}
 			<div class="absolute inset-0" in:morph={{ y: 22 }} out:morph={{ y: 22 }}>
-				<DotLottieSvelte src={scene.body} autoplay loop layout={{ fit: 'cover', align: [0.5, 1] }} />
+				<DotLottieSvelte src={scene.body} autoplay loop layout={{ fit: 'cover', align: [0.5, 0.5] }} />
 			</div>
 		{/key}
-	</div>
 
-	<div class="relative mx-auto mt-0 w-full max-w-[26rem] shrink-0 pb-1">
-		<div
-			class="sticky-note relative flex min-h-[3.5rem] w-full items-center justify-center !px-5 !py-3 !text-[clamp(1.05rem,4vw,1.375rem)] text-brown"
-		>
-			{#key phase}
-				<p
-					class="absolute inset-0 flex flex-col items-center justify-center gap-1.5 px-4 text-center !leading-[1.28]"
-					in:morph={{ duration: SAY_MS, y: 10, scale: 0.985, blur: 3 }}
-					out:morph={{ duration: SAY_MS, y: 10, scale: 0.985, blur: 3 }}
-				>
-					<span>{caption}</span>
-				</p>
-			{/key}
+		<div class="absolute inset-x-0 bottom-0 z-10 pb-10">
+			<div
+				class="quote sticky-note @container relative flex min-h-[3.25rem] w-full items-center justify-center !rounded-t-none !px-2 !py-1 text-brown"
+			>
+				{#key phase}
+					<p
+						class="absolute inset-0 flex items-center justify-center whitespace-nowrap text-center text-[4.4cqw] !leading-[1.25]"
+						in:morph={{ duration: SAY_MS, y: 10, scale: 0.985, blur: 3 }}
+						out:morph={{ duration: SAY_MS, y: 10, scale: 0.985, blur: 3 }}
+					>
+						{@html captionHtml}
+					</p>
+				{/key}
+			</div>
 		</div>
 	</div>
 </div>
+
+<style>
+	/*
+	 * The note is already --color-yellow, so the shared 65% wash on `mark.hl` sinks into it and
+	 * the highlight reads as nothing. Push the opacity up so the lime/blue/pink land as highlighter.
+	 * `:global` is required because the marks come from `{@html}`, which the compiler cannot scope.
+	 */
+	.quote :global(mark.hl::before) {
+		opacity: 0.92;
+	}
+</style>

@@ -175,25 +175,30 @@ mark.hl::before {
 	inset: 0;
 	content: '';
 	width: calc(100% + 0.35ch);
-	left: -0.2ch;
+	left: 0.3ch;
 	height: 92%;
 	top: 4%;
 	background-color: var(--hl);
-	opacity: 0.65;
+	opacity: 0.9;
 	border-bottom-right-radius: 14px 22px;
 	filter: url(#filter-rough);
 	z-index: -1;
 }
 
-.hl-lime {
+/*
+ * These must out-specify `mark.hl` above, which sets `--hl` at (0,1,1). As bare
+ * classes they were only (0,1,0), so the yellow default won and every tone rendered
+ * yellow. Qualifying them with `mark.hl` puts them at (0,2,1) and makes them apply.
+ */
+mark.hl.hl-lime {
 	--hl: var(--color-lime);
 }
 
-.hl-blue {
+mark.hl.hl-blue {
 	--hl: var(--color-blue);
 }
 
-.hl-pink {
+mark.hl.hl-pink {
 	--hl: var(--color-pink);
 }
 
