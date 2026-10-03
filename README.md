@@ -93,6 +93,41 @@ scripts/eval.ts    model evaluation harness
 - Hosted mode sends anonymized behavioral context to a third-party API (NVIDIA NIM, open-weight models). Local mode (Ollama) sends nothing anywhere.
 - Export or wipe all your data from Settings at any time.
 
+## Deploy to Vercel
+
+This is a static SPA (`adapter-static` -> `build/`), and `vercel.json` already wires the important parts.
+
+```bash
+npx vercel            # preview
+npx vercel --prod     # production
+```
+
+What `vercel.json` handles for you:
+
+- `framework: null` + `buildCommand` + `outputDirectory: build` so Vercel treats this as a plain static site instead of applying its SvelteKit (SSR) preset, which would look for `.svelte-kit/output`.
+- A catch-all rewrite to `/index.html`, excluding `_app`. Without it a shared link like `/dashboard` would 404, because an SPA build emits **only** `index.html` (verified: `build/` contains no per-route HTML). Real files (`og-image.png`, `robots.txt`, `favicon.svg`, `_app/*`) are served from the filesystem first, so they are never rewritten.
+- Long-lived immutable caching for hashed `_app` assets, plus `nosniff`, `Referrer-Policy`, `X-Frame-Options` and a locked-down `Permissions-Policy`.
+
+Set these as Vercel environment variables (**Settings -> Environment Variables**, for both Preview and Production, then redeploy — `VITE_*` values are baked in at build time):
+
+| Variable | Required | Notes |
+|---|---|---|
+| `VITE_SUPABASE_URL` | for hosted mode | your project URL; setting it flips the app into proxy mode |
+| `VITE_SUPABASE_ANON_KEY` | for hosted mode | public anon key, safe in the browser |
+| `VITE_NIM_MODEL` | recommended | a **live** NVIDIA NIM model id, e.g. `openai/gpt-oss-20b` (`npm run check-nim` to verify) |
+
+`NIM_API_KEY` must **not** be a Vercel build env var. Only `VITE_*` variables reach the browser bundle, and the key is only ever read by the Supabase edge function. Store it as a Supabase secret:
+
+```bash
+supabase link --project-ref <your-ref>
+supabase secrets set NIM_API_KEY=nvapi-...
+supabase functions deploy plan
+```
+
+Without `VITE_SUPABASE_URL` the app runs fully local: localStorage storage, and it plans via Ollama (or the in-code template planner) with no backend at all. That is the fastest way to demo, and it needs zero configuration.
+
+Two post-deploy chores: set your real domain in `src/app.html`, `static/robots.txt` and `static/sitemap.xml` (currently the `mom-exe.vercel.app` placeholder) so link previews point at the right origin, and upload `static/og-image.png` under repo Settings -> Social preview for the GitHub card.
+
 ## SEO, thumbnail and logo
 
 Link previews (GitHub, X, Discord, LinkedIn, Slack) read tags from `src/app.html` — they never run JS, so the Open Graph + Twitter Card tags live there, not in `svelte:head`.
