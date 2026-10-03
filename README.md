@@ -35,13 +35,7 @@ Hosted mode is honest: anonymized context (never your name, email or birth date)
 Supabase's Magic Link and Email OTP share one implementation (`signInWithOtp`); the email content decides which you get. The default template sends **only a link**, so the 6-digit code field would be useless. Two dashboard changes:
 
 1. **Auth → URL Configuration**: set the Site URL to your deployed URL and add `http://localhost:5173/**` plus your production URL to Redirect URLs. Mom.exe passes `emailRedirectTo: <origin>/login`, which must be on this list.
-2. **Auth → Email Templates → Magic Link**: use a dual template so both paths work:
-
-```html
-<h2>Sign in to Mom.exe</h2>
-<p><a href="{{ .ConfirmationURL }}">Tap to sign in</a></p>
-<p>Or enter this code: {{ .Token }}</p>
-```
+2. **Auth → Email Templates → Magic Link**: paste the full template from [`supabase/templates/magic-link.html`](supabase/templates/magic-link.html) (subject suggestion: `Check in with Mom — your code inside`). It contains both `{{ .ConfirmationURL }}` and `{{ .Token }}`, styled to match the app.
 
 The link path needs no code: the user taps it on the same device, lands back on `/login`, and the app catches the session automatically (`token_hash`/URL detection + `onAuthStateChange`). The code path calls `verifyOtp({ email, token, type: 'email' })` and accepts 6-10 digits (Supabase's OTP length is configurable under Auth → Email). Codes and links expire after 1 hour; one request per 60 seconds (Supabase defaults).
 

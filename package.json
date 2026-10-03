@@ -33,6 +33,7 @@
 		"vitest": "^3.2.0"
 	},
 	"dependencies": {
+		"@lottiefiles/dotlottie-svelte": "^0.10.15",
 		"@supabase/supabase-js": "^2.50.0",
 		"zod": "^3.25.0"
 	}
