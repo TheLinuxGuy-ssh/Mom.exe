@@ -108,8 +108,28 @@
 	}
 </script>
 
-<div class="relative mx-auto w-full max-w-lg select-none h-full" aria-hidden="true">
-	<div class="relative aspect-[5/4] w-full overflow-hidden h-full">
+<div class="relative mx-auto w-full max-w-lg select-none h-full flex items-end" aria-hidden="true">
+
+		<div class={`absolute right-0 top-0 h-[40%] w-[60%]`}>
+			{#if phase === 'night'}
+				<div
+					class="h-full w-full"
+					in:slide={{ dir: 'left', duration: 500 }}
+					out:slide={{ dir: 'right', duration: 380, out: true }}
+				>
+					<DotLottieSvelte src="/sadballs.lottie" autoplay loop layout={{ fit: 'cover', align: [0.5, 0.5] }} />
+				</div>
+			{:else}
+				<div
+					class="h-full w-full"
+					in:slide={{ dir: 'left', duration: 500, delay: 150 }}
+					out:slide={{ dir: 'right', duration: 380, out: true }}
+				>
+					<DotLottieSvelte src="/smilingsun.lottie" autoplay loop layout={{ fit: 'contain', align: [0.5, 0.5] }} />
+				</div>
+			{/if}
+		</div>
+	<div class="relative aspect-[5/4] w-full overflow-hidden h-[65%]">
 		<div class="absolute inset-0">
 			{#if phase === 'night'}
 				<div
@@ -117,7 +137,7 @@
 					in:slide={{ dir: 'up', duration: 500 }}
 					out:slide={{ dir: 'down', duration: 380, out: true }}
 				>
-					<DotLottieSvelte src="/catsleeping.lottie" autoplay loop layout={{ fit: 'cover', align: [0.5, 0.5] }} />
+					<DotLottieSvelte src="/catsleeping.lottie" autoplay loop layout={{ fit: 'cover', align: [0.3,0.3] }} />
 				</div>
 			{:else}
 				<div
@@ -125,7 +145,7 @@
 					in:slide={{ dir: 'up', duration: 500, delay: 150 }}
 					out:slide={{ dir: 'down', duration: 380, out: true }}
 				>
-					<DotLottieSvelte src="/palmdancing.lottie" autoplay loop layout={{ fit: 'cover', align: [0.5, 0.5] }} />
+					<DotLottieSvelte src="/palmdancing.lottie" autoplay loop layout={{ fit: 'cover', align: [0.3,0.3] }} />
 				</div>
 			{/if}
 			<div class="relative -mt-1 h-11 overflow-hidden">
@@ -147,26 +167,6 @@
 			</p>
 		{/if}
 	</div>
-		</div>
-
-		<div class="absolute right-[2%] top-[2%] h-[40%] w-[40%]">
-			{#if phase === 'night'}
-				<div
-					class="h-full w-full"
-					in:slide={{ dir: 'left', duration: 500 }}
-					out:slide={{ dir: 'right', duration: 380, out: true }}
-				>
-					<DotLottieSvelte src="/sadballs.lottie" autoplay loop layout={{ fit: 'contain', align: [0.5, 0.5] }} />
-				</div>
-			{:else}
-				<div
-					class="h-full w-full"
-					in:slide={{ dir: 'left', duration: 500, delay: 150 }}
-					out:slide={{ dir: 'right', duration: 380, out: true }}
-				>
-					<DotLottieSvelte src="/smilingsun.lottie" autoplay loop layout={{ fit: 'contain', align: [0.5, 0.5] }} />
-				</div>
-			{/if}
 		</div>
 	</div>
 </div>
