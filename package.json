@@ -14,7 +14,8 @@
 		"test": "vitest run",
 		"eval": "tsx scripts/eval.ts",
 		"check-nim": "tsx scripts/check-nim.ts",
-		"og": "tsx scripts/render-og.ts"
+		"og": "tsx scripts/render-og.ts",
+		"test:student": "tsx scripts/student-test.ts"
 	},
 	"devDependencies": {
 		"@resvg/resvg-js": "^2.6.2",

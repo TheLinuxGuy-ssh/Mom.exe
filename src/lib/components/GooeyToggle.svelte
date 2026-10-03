@@ -19,16 +19,19 @@
 
 <div class="relative {cls}">
 	<!--
-		The pill is a plain block that fills its slot edge to edge, and the caller's
-		`rounded-full overflow-hidden` container does the rounding. Giving the pill its own
-		`rounded-full` left semicircular ends inset from the border, and `filter: url(#gooey)`
-		eroded the edges further (its feGaussianBlur pulls the alpha in before feComposite),
-		so the pill never met the left/right border. The gooey filter is also pointless here:
-		it only shows when adjacent blobs merge, and there is only ever one pill.
+		The pill is `h-full` + `rounded-full`, and the caller's `rounded-full overflow-hidden`
+		border is exactly one border-width thicker, so both radii resolve to height/2. The pill's
+		semicircular ends therefore sit precisely on the container's inner curve: flush against
+		the left/right border at rest, still fully rounded.
+
+		`filter: url(#gooey)` was what broke it. feGaussianBlur pulls alpha inward before
+		feComposite clips back to the source, eroding a few px off those straight/round edges and
+		leaving a visible gap. It bought nothing here anyway: gooey only reads when adjacent blobs
+		merge, and there is only ever one pill.
 	-->
 	<div class="absolute inset-0 overflow-hidden rounded-full pointer-events-none">
 		<div
-			class="h-full {indicator} transition-transform duration-200 ease-out"
+			class="h-full rounded-full {indicator} transition-transform duration-200 ease-out"
 			style="width: {width}%; transform: translateX({index * 100}%)"
 		></div>
 	</div>

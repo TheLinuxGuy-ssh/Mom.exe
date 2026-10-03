@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildContext, buildTodayInfo, basisFor } from './context';
-import type { Checkin, Followup, Profile } from '../storage/types';
+import { buildContext, buildTodayInfo, basisFor, buildPriorPlan } from './context';
+import type { Checkin, Followup, Plan, Profile } from '../storage/types';
 import { scrubText, ageBand } from './scrub';
 
 const profile: Profile = {
@@ -102,6 +102,89 @@ describe('basisFor', () => {
 		expect(basisFor(0)).toBe('priors');
 		expect(basisFor(3)).toBe('partial');
 		expect(basisFor(7)).toBe('full');
+	});
+});
+
+describe('buildPriorPlan', () => {
+	const tz = 'Asia/Kolkata';
+
+	function plan(blocks: { start: string; end: string; action: string }[]): Plan {
+		return {
+			id: 'p1',
+			user_id: 'u1',
+			local_date: '2026-10-03',
+			as_of: '2026-10-03T09:00:00.000Z',
+			context_snapshot: {},
+			output: {
+				summary: 's',
+				blocks: blocks.map((b) => ({ ...b, detail: 'd', why: '' })),
+				flags: []
+			},
+			basis: 'full',
+			model_id: 'm',
+			fallback_reason: null,
+			supersedes_plan_id: null,
+			created_at: '2026-10-03T09:00:00.000Z'
+		};
+	}
+
+	// 2026-10-03T21:40+05:30 === 16:10Z
+	const now = new Date('2026-10-03T21:40:00+05:30');
+
+	it('is null when there is no plan to supersede', () => {
+		expect(buildPriorPlan(null, {}, now, tz)).toBeNull();
+	});
+
+	it('drops blocks that have not started yet', () => {
+		const p = plan([
+			{ start: '09:00', end: '10:30', action: 'class' },
+			{ start: '22:00', end: '23:00', action: 'wind_down' }
+		]);
+		const out = buildPriorPlan(p, {}, now, tz)!;
+		expect(out.blocks).toHaveLength(1);
+		expect(out.blocks[0].action).toBe('class');
+	});
+
+	it('maps taps to done and skipped, and elapsed-but-untapped to unknown', () => {
+		const p = plan([
+			{ start: '09:00', end: '10:30', action: 'class' },
+			{ start: '13:00', end: '14:00', action: 'study_block' },
+			{ start: '15:00', end: '15:30', action: 'hydration' }
+		]);
+		const out = buildPriorPlan(
+			p,
+			{ '09:00-10:30': 'yes', '13:00-14:00': 'no' },
+			now,
+			tz
+		)!;
+		expect(out.blocks.map((b) => b.status)).toEqual(['done', 'skipped', 'unknown']);
+	});
+
+	it('marks the block the clock is inside as in_progress', () => {
+		const p = plan([
+			{ start: '09:00', end: '10:30', action: 'class' },
+			{ start: '21:00', end: '22:00', action: 'study_block' }
+		]);
+		const out = buildPriorPlan(p, {}, now, tz)!;
+		expect(out.blocks[1].status).toBe('in_progress');
+	});
+
+	it('does not treat an overnight block as already over', () => {
+		// 01:00-07:00 sleep block, clock at 03:00 -> still in progress, not elapsed
+		const p = plan([{ start: '01:00', end: '07:00', action: 'sleep' }]);
+		const out = buildPriorPlan(p, {}, new Date('2026-10-04T03:00:00+05:30'), tz)!;
+		expect(out.blocks[0].status).toBe('in_progress');
+	});
+
+	it('treats an overnight block as done once the morning is past it', () => {
+		const p = plan([{ start: '23:30', end: '07:00', action: 'sleep' }]);
+		const out = buildPriorPlan(p, { '23:30-07:00': 'yes' }, new Date('2026-10-04T09:00:00+05:30'), tz)!;
+		expect(out.blocks[0].status).toBe('done');
+	});
+
+	it('is null when nothing has started, so the model is not told about an untouched plan', () => {
+		const p = plan([{ start: '22:00', end: '23:00', action: 'wind_down' }]);
+		expect(buildPriorPlan(p, {}, now, tz)).toBeNull();
 	});
 });
 

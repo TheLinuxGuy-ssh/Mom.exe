@@ -100,6 +100,40 @@ export interface Followup {
 
 export type FollowupInput = Omit<Followup, 'id' | 'user_id' | 'created_at'>;
 
+export type MessageRole = 'user' | 'mom';
+export type MessageKind = 'chat' | 'note' | 'replan';
+
+/**
+ * The conversation log. Every note sent to mom and every reply she gives, so that chat and
+ * planning share one memory. `kind` distinguishes a plain conversation from a planning
+ * exchange, which keeps the history page able to filter without parsing text.
+ */
+export interface Message {
+	id: string;
+	user_id: string;
+	local_date: string;
+	role: MessageRole;
+	kind: MessageKind;
+	content: string;
+	created_at: string;
+}
+
+export type MessageInput = Omit<Message, 'id' | 'user_id' | 'created_at'>;
+
+/**
+ * A compressed stand-in for messages that have aged out of the context window, so mom keeps
+ * a thread on older weeks without every old line being resent each time.
+ */
+export interface WeekDigest {
+	id: string;
+	user_id: string;
+	week_start: string;
+	content: string;
+	created_at: string;
+}
+
+export type WeekDigestInput = Omit<WeekDigest, 'id' | 'user_id' | 'created_at'>;
+
 export interface Storage {
 	getProfile(userId: string): Promise<Profile | null>;
 	saveProfile(userId: string, p: ProfileInput): Promise<Profile>;
@@ -110,5 +144,11 @@ export interface Storage {
 	listPlans(userId: string, limit: number): Promise<Plan[]>;
 	saveFollowups(userId: string, planId: string, rows: Omit<FollowupInput, 'plan_id'>[]): Promise<void>;
 	listFollowups(userId: string, planIds: string[]): Promise<Followup[]>;
+	appendMessages(userId: string, rows: MessageInput[]): Promise<void>;
+	/** Newest first. The context window uses a small limit; the history page uses a large one. */
+	listMessages(userId: string, limit: number): Promise<Message[]>;
+	saveWeekDigest(userId: string, d: WeekDigestInput): Promise<void>;
+	/** Newest week first. */
+	listWeekDigests(userId: string, limit: number): Promise<WeekDigest[]>;
 	deleteAll(userId: string): Promise<void>;
 }

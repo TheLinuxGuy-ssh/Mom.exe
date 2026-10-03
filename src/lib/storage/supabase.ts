@@ -3,11 +3,15 @@ import type {
 	Checkin,
 	CheckinInput,
 	Followup,
+	Message,
+	MessageInput,
 	Plan,
 	PlanInput,
 	Profile,
 	ProfileInput,
-	Storage
+	Storage,
+	WeekDigest,
+	WeekDigestInput
 } from './types';
 
 export class SupabaseStorage implements Storage {
@@ -103,10 +107,47 @@ export class SupabaseStorage implements Storage {
 		return (data as Followup[]) ?? [];
 	}
 
+	async appendMessages(userId: string, rows: MessageInput[]): Promise<void> {
+		if (rows.length === 0) return;
+		const { error } = await this.client
+			.from('messages')
+			.insert(rows.map((r) => ({ user_id: userId, ...r })));
+		if (error) throw new Error(error.message);
+	}
+
+	async listMessages(userId: string, limit: number): Promise<Message[]> {
+		const { data, error } = await this.client
+			.from('messages')
+			.select('*')
+			.eq('user_id', userId)
+			.order('created_at', { ascending: false })
+			.limit(limit);
+		if (error) throw new Error(error.message);
+		return (data as Message[]) ?? [];
+	}
+
+	async saveWeekDigest(userId: string, d: WeekDigestInput): Promise<void> {
+		const { error } = await this.client
+			.from('week_digests')
+			.upsert({ user_id: userId, ...d }, { onConflict: 'user_id,week_start' });
+		if (error) throw new Error(error.message);
+	}
+
+	async listWeekDigests(userId: string, limit: number): Promise<WeekDigest[]> {
+		const { data, error } = await this.client
+			.from('week_digests')
+			.select('*')
+			.eq('user_id', userId)
+			.order('week_start', { ascending: false })
+			.limit(limit);
+		if (error) throw new Error(error.message);
+		return (data as WeekDigest[]) ?? [];
+	}
+
 	async deleteAll(userId: string): Promise<void> {
-		for (const table of ['followups', 'plans', 'checkins', 'profiles']) {
+		for (const table of ['followups', 'week_digests', 'messages', 'plans', 'checkins']) {
 			const { error } = await this.client.from(table).delete().eq('user_id', userId);
-			if (error && table !== 'profiles') throw new Error(error.message);
+			if (error) throw new Error(error.message);
 		}
 		const { error } = await this.client.from('profiles').delete().eq('id', userId);
 		if (error) throw new Error(error.message);

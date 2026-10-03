@@ -3,11 +3,15 @@ import type {
 	CheckinInput,
 	Followup,
 	FollowupInput,
+	Message,
+	MessageInput,
 	Plan,
 	PlanInput,
 	Profile,
 	ProfileInput,
-	Storage
+	Storage,
+	WeekDigest,
+	WeekDigestInput
 } from './types';
 
 const memory = new Map<string, string>();
@@ -147,8 +151,47 @@ export class LocalStorage implements Storage {
 		return read<Followup[]>(key(userId, 'followups'), []).filter((f) => set.has(f.plan_id));
 	}
 
+	async appendMessages(userId: string, rows: MessageInput[]): Promise<void> {
+		if (rows.length === 0) return;
+		const list = read<Message[]>(key(userId, 'messages'), []);
+		for (const r of rows) {
+			list.push({
+				id: uid(),
+				user_id: userId,
+				created_at: new Date().toISOString(),
+				...r
+			});
+		}
+		list.sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+		write(key(userId, 'messages'), list);
+	}
+
+	async listMessages(userId: string, limit: number): Promise<Message[]> {
+		return read<Message[]>(key(userId, 'messages'), [])
+			.sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+			.slice(0, limit);
+	}
+
+	async saveWeekDigest(userId: string, d: WeekDigestInput): Promise<void> {
+		const list = read<WeekDigest[]>(key(userId, 'week_digests'), []);
+		const existing = list.find((x) => x.week_start === d.week_start);
+		if (existing) {
+			existing.content = d.content;
+		} else {
+			list.push({ id: uid(), user_id: userId, created_at: new Date().toISOString(), ...d });
+		}
+		list.sort((a, b) => (a.week_start < b.week_start ? 1 : -1));
+		write(key(userId, 'week_digests'), list);
+	}
+
+	async listWeekDigests(userId: string, limit: number): Promise<WeekDigest[]> {
+		return read<WeekDigest[]>(key(userId, 'week_digests'), [])
+			.sort((a, b) => (a.week_start < b.week_start ? 1 : -1))
+			.slice(0, limit);
+	}
+
 	async deleteAll(userId: string): Promise<void> {
-		for (const kind of ['profile', 'checkins', 'plans', 'followups']) {
+		for (const kind of ['profile', 'checkins', 'plans', 'followups', 'messages', 'week_digests']) {
 			store.removeItem(key(userId, kind));
 		}
 	}

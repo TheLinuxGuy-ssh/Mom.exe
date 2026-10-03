@@ -1,8 +1,9 @@
-import type { Basis, Checkin, Followup, Profile } from '../storage/types';
+import type { Basis, Checkin, Followup, Plan, Profile } from '../storage/types';
 import { computeStats, type Stats } from './stats';
 import { ageBand, scrubText } from './scrub';
 import { disturbanceTheme } from './extract';
-import { localDateInTz, minToHHMM, nowMinutesInTz, weekdayInTz } from './time';
+import { hhmmToMin, localDateInTz, minToHHMM, nowMinutesInTz, weekdayInTz } from './time';
+import type { ContextMessage, DigestBatchMessage } from './memory';
 
 export interface TodayInfo {
 	classes: { start: string; end: string }[];
@@ -12,11 +13,29 @@ export interface TodayInfo {
 	caffeine_last_at: string | null;
 }
 
+export type PriorBlockStatus = 'done' | 'skipped' | 'unknown' | 'in_progress';
+
+export interface PriorBlock {
+	start: string;
+	end: string;
+	action: string;
+	status: PriorBlockStatus;
+}
+
 export interface ContextPayload {
 	as_of_local: string;
 	day_of_week: string;
 	timezone: string;
+	prior_plan: {
+		as_of: string;
+		blocks: PriorBlock[];
+	} | null;
 	today: TodayInfo;
+	conversation: {
+		recent: ContextMessage[];
+		older_digests: { week_start: string; text: string }[];
+		to_digest: DigestBatchMessage[];
+	};
 	recent_days: {
 		days_ago: number;
 		quick: string | null;
@@ -86,12 +105,63 @@ export function buildTodayInfo(profile: Profile, todayCheckin: Checkin | null, t
 	};
 }
 
+/**
+ * Turns the plan being superseded into "what already happened", so a replan can adjust the
+ * remaining day instead of blindly regenerating it. Handles blocks that cross midnight
+ * (`end <= start`) the same way Timeline does, so a 23:30-07:00 sleep block is not read as
+ * having ended the moment it started.
+ */
+export function buildPriorPlan(
+	plan: Plan | null,
+	marks: Record<string, 'yes' | 'no'>,
+	now: Date,
+	tz: string
+): ContextPayload['prior_plan'] {
+	if (!plan) return null;
+
+	const minutes = nowMinutesInTz(tz, now);
+	const blocks: PriorBlock[] = [];
+
+	for (const b of plan.output.blocks) {
+		const start = hhmmToMin(b.start);
+		const end = hhmmToMin(b.end);
+		const overnight = end <= start;
+		// A block that starts late and ends early (23:30 -> 07:00) began on the previous
+		// day. Comparing against plain "minutes" would skip it all morning, so shift the
+		// window back a day when the clock has already passed the original end time.
+		const startedLastNight = overnight && minutes >= end;
+		const offset = startedLastNight ? -1440 : 0;
+
+		// not started yet: the model must treat it as still upcoming
+		if (minutes < start + offset) continue;
+
+		const mark = marks[`${b.start}-${b.end}`];
+		let status: PriorBlockStatus;
+		if (minutes < end + offset) {
+			status = 'in_progress';
+		} else if (mark === 'yes') {
+			status = 'done';
+		} else if (mark === 'no') {
+			status = 'skipped';
+		} else {
+			status = 'unknown';
+		}
+
+		blocks.push({ start: b.start, end: b.end, action: b.action, status });
+	}
+
+	if (blocks.length === 0) return null;
+	return { as_of: plan.as_of, blocks };
+}
+
 export function buildContext(
 	profile: Profile,
 	checkins: Checkin[],
 	followups: Followup[],
 	today: TodayInfo,
-	now: Date
+	now: Date,
+	priorPlan?: ContextPayload['prior_plan'],
+	conversation?: ContextPayload['conversation']
 ): { payload: ContextPayload; basis: Basis } {
 	const tz = profile.timezone;
 	const todayStr = localDateInTz(tz, now);
@@ -132,7 +202,9 @@ export function buildContext(
 		as_of_local: `${todayStr} ${minToHHMM(nowMinutesInTz(tz, now))}`,
 		day_of_week: weekdayInTz(tz, now),
 		timezone: tz,
+		prior_plan: priorPlan ?? null,
 		today,
+		conversation: conversation ?? { recent: [], older_digests: [], to_digest: [] },
 		recent_days: recent,
 		stats,
 		weekly_summaries,

@@ -38,3 +38,21 @@ export const ExtractionSchema = z.object({
 
 export type PlanOutput = z.infer<typeof PlanOutputSchema>;
 export type Extraction = z.infer<typeof ExtractionSchema>;
+
+/**
+ * What the note was actually for. "chat" means the student wanted to talk, not be replanned:
+ * mom answers, nothing is scheduled, and no plan row is written. "plan" is the normal path.
+ */
+export const IntentSchema = z.enum(['plan', 'chat']);
+export type Intent = z.infer<typeof IntentSchema>;
+
+/** Set when a chat should hand control back to the planner. */
+export const HandoffSchema = z.enum(['replan']);
+export type Handoff = z.infer<typeof HandoffSchema>;
+
+export const WeekDigestSchema = z.object({
+	week: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+	text: z.string().min(1).max(600)
+});
+
+export type WeekDigestOut = z.infer<typeof WeekDigestSchema>;

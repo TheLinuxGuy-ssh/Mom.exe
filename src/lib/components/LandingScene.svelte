@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { DotLottieSvelte } from '@lottiefiles/dotlottie-svelte';
+	import { EASE_SOFT } from '$lib/engine/easing';
 
 	type Phase = 'night' | 'day';
 	type Fit = 'cover' | 'contain';
@@ -94,34 +95,6 @@
 		}, phase === 'night' ? SAD_MS : HAPPY_MS);
 		return () => clearTimeout(timer);
 	});
-
-	// Near-linear and symmetric: the dissolve then advances evenly instead of
-	// flashing early and trailing off, which a front-loaded ease-out would do.
-	const EASE_SOFT = cubicBezier(0.45, 0, 0.55, 1);
-
-	function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t: number) => number {
-		const cx = 3 * x1;
-		const bx = 3 * (x2 - x1) - cx;
-		const ax = 1 - cx - bx;
-		const cy = 3 * y1;
-		const by = 3 * (y2 - y1) - cy;
-		const ay = 1 - cy - by;
-		const sampleX = (t: number) => ((ax * t + bx) * t + cx) * t;
-		const sampleDX = (t: number) => (3 * ax * t + 2 * bx) * t + cx;
-		return (t: number): number => {
-			if (t <= 0) return 0;
-			if (t >= 1) return 1;
-			let x = t;
-			for (let i = 0; i < 8; i++) {
-				const err = sampleX(x) - t;
-				if (Math.abs(err) < 1e-6) break;
-				const d = sampleDX(x);
-				if (Math.abs(d) < 1e-6) break;
-				x -= err / d;
-			}
-			return ((ay * x + by) * x + cy) * x;
-		};
-	}
 
 	type MorphParams = { duration?: number; y?: number; scale?: number; blur?: number };
 
