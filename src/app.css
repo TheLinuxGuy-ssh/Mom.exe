@@ -238,26 +238,6 @@ mark.hl::before {
 	animation: steam 2s ease-in-out infinite;
 }
 
-.gooey-track {
-	position: relative;
-	filter: url(#gooey);
-}
-
-.gooey-track > .gooey-indicator {
-	position: absolute;
-	top: 0;
-	left: 0;
-	width: 33.333%;
-	height: 100%;
-	background: var(--color-orange);
-	border-radius: 999px;
-	transition: transform 0.25s ease;
-}
-
-.gooey-track.two > .gooey-indicator {
-	width: 50%;
-}
-
 @keyframes morph {
 	to {
 		border-radius: 70% 30% 42% 58% / 40% 65% 35% 60%;

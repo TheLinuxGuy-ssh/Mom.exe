@@ -19,21 +19,21 @@ export const PlanOutputSchema = z.object({
 });
 
 export const ExtractionSchema = z.object({
-	sleep_hours: z.number().min(0).max(16).nullable(),
-	slept_at: z.string().regex(HHMM_RE).nullable(),
-	woke_at: z.string().regex(HHMM_RE).nullable(),
+	sleep_hours: z.number().min(0).max(16).nullish(),
+	slept_at: z.string().regex(HHMM_RE).nullish(),
+	woke_at: z.string().regex(HHMM_RE).nullish(),
 	meals: z
 		.object({
-			b: z.boolean().nullable(),
-			l: z.boolean().nullable(),
-			s: z.boolean().nullable(),
-			d: z.boolean().nullable()
+			b: z.boolean().nullish(),
+			l: z.boolean().nullish(),
+			s: z.boolean().nullish(),
+			d: z.boolean().nullish()
 		})
-		.nullable(),
-	mood: z.number().int().min(1).max(5).nullable(),
-	quick: z.enum(['rough', 'okay', 'great']).nullable(),
+		.nullish(),
+	mood: z.number().int().min(1).max(5).nullish(),
+	quick: z.enum(['rough', 'okay', 'great']).nullish(),
 	disturbances: z.array(z.string().max(40)).max(4).default([]),
-	deadline_notes: z.string().max(120).nullable()
+	deadline_notes: z.string().max(120).nullish()
 });
 
 export type PlanOutput = z.infer<typeof PlanOutputSchema>;

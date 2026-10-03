@@ -48,18 +48,21 @@ The link path needs no code: the user taps it on the same device, lands back on 
 ## How it works
 
 ```
-note ("slept at 3, skipped breakfast, dsa due tomorrow")
+note ("slept at 4am, woke at 10, didn't eat breakfast. how do i fix this?")
   -> PII scrubber (code)
-  -> local heuristics (chips you can edit; explicit chips beat model extraction)
-  -> optional LLM extraction (fills nulls only)
+  -> ONE open-weight model call: note + context in,
+       { understanding, advice, plan } out
+       understanding = AI-verified intent (negation-aware: "didn't eat" = skipped)
+       advice        = direct answer to the question in the note
+       plan          = the rest of today + tonight (fixed action vocabulary)
+  -> normalize: alias-map actions/flags (lunch -> eat_meal), repair times,
+       drop overlaps, sort (small open models drift; the app doesn't)
   -> stored structurally (Supabase w/ RLS, or localStorage)
-  -> context builder: 3 layers
-       raw last 7-14 days (days_ago labels only)
-       stats computed IN CODE (sleep debt, bedtime drift, top disturbance...)
-       one-line weekly summaries
-  -> schema-constrained plan JSON (fixed action vocabulary, zod-validated)
-  -> bad output? one repair retry, then deterministic template plan
-  -> Now->Next timeline: auto-advancing blocks, done/skip marks, replan from now
+       merge precedence: your taps > AI understanding > keywords > existing row
+  -> schema-constrained, zod-validated; bad output? one repair retry,
+       then the deterministic in-code template planner (the app always plans)
+  -> dashboard: one NOW hero card with countdown, one-line "then:",
+       full day on tap, done/skip marks, replan from now
 ```
 
 - Frontend: SvelteKit (SPA mode) + TypeScript + Tailwind CSS 4, icons by Lucide.
@@ -169,14 +172,17 @@ Two structural guarantees behind these paths: `NIM_API_KEY` is only ever read by
 
 | Metric | Value |
 |---|---|
-| First-shot schema validity | 6/8 across 4 synthetic personas |
-| Validity after one repair retry (what the app does) | 8/8 |
-| Latency | 10-25s typical, ~45s when the repair retry fires |
-| Model output length | 2.3-2.7k chars |
+| Plan validity, first shot | 8/8 across 4 synthetic personas |
+| Plan validity after one repair retry (what the app does) | 8/8 |
+| Note-understanding field accuracy (AI + merge, 10 notes x 2 runs) | 22/22 |
+| Latency, one combined call | 7-17s typical |
+| Model output length | ~2.3k chars |
 
 That latency is inherent to *reasoning* models on a long context, and it is why `reasoning_effort` matters: at the default `medium`/high the same call burned the entire token budget on reasoning and returned **zero content** (41s, `finish_reason: length`), which surfaced as the unreachable banner. `reasoning_effort: 'low'` (now the default) cut the same call to ~12s with full output. If you want a snappier demo, swap to a smaller non-reasoning model in Settings, or use Ollama locally.
 
-Because open models drift outside the fixed vocabulary (`"action": "lunch"`), `src/lib/llm/normalize.ts` repairs near-miss output before validation: it alias-maps actions and flags (`lunch` → `eat_meal`, `late_caffeine` → `high_caffeine_evening`), repairs loose times (`9.30` → `09:30`), truncates over-long fields, drops overlaps, and sorts the day. Only if nothing usable survives does the deterministic template planner take over.
+Because open models drift outside the fixed vocabulary (`"action": "lunch"`, invented flag names), `src/lib/llm/normalize.ts` repairs near-miss output before validation: it alias-maps actions and flags (`lunch` → `eat_meal`, `late_caffeine` → `high_caffeine_evening`), repairs loose times (`9.30` → `09:30`), truncates over-long fields, drops overlaps, and sorts the day. Only if nothing usable survives does the deterministic template planner take over.
+
+Keyword heuristics are demoted to a typing-preview and offline fallback, with a negation-aware parser (`"didn't eat breakfast"` = skipped, never eaten; negation never leaks across a comma into the next clause). Run `EVAL_NOTES=1 npm run eval` to reproduce the note-understanding table.
 
 ## License
 

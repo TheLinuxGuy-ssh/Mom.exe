@@ -13,6 +13,7 @@
 	import { testConnection } from '$lib/llm/client';
 	import { getSessionUser } from '$lib/auth/supabase';
 	import { toast } from '$lib/stores/toast';
+	import GooeyToggle from '$lib/components/GooeyToggle.svelte';
 	import { seedPersona, PERSONAS } from '../../../dev-fixtures/personas';
 
 	let profile = $state<Profile | null>(null);
@@ -151,13 +152,14 @@
 		<div class="flex items-center justify-between">
 			<h2 class="font-black uppercase text-sm tracking-widest text-brown">the brain (open weights)</h2>
 			<div class="w-40 border-2 border-ink rounded-full overflow-hidden bg-paper">
-				<div class="gooey-track two">
-					<div class="gooey-indicator" style="transform: translateX({cfg.mode === 'proxy' ? '0' : '100'}%)"></div>
-					<div class="relative flex">
-						<button type="button" class="flex-1 px-3 py-1.5 text-xs font-extrabold z-10 cursor-pointer {cfg.mode === 'proxy' ? 'text-paper' : 'text-ink/60'}" onclick={() => updateCfg('mode', 'proxy')}>hosted</button>
-						<button type="button" class="flex-1 px-3 py-1.5 text-xs font-extrabold z-10 cursor-pointer {cfg.mode === 'direct' ? 'text-paper' : 'text-ink/60'}" onclick={() => updateCfg('mode', 'direct')}>local</button>
-					</div>
-				</div>
+				<GooeyToggle
+					options={[
+						{ value: 'proxy', label: 'hosted' },
+						{ value: 'direct', label: 'local' }
+					]}
+					value={cfg.mode}
+					onchange={(v) => updateCfg('mode', v as 'proxy' | 'direct')}
+				/>
 			</div>
 		</div>
 		<p class="text-xs font-semibold text-mute leading-relaxed">

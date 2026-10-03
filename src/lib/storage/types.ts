@@ -67,6 +67,7 @@ export interface PlanBlock {
 export interface PlanOutput {
 	summary: string;
 	data_note?: string;
+	advice?: string;
 	blocks: PlanBlock[];
 	flags: string[];
 }
