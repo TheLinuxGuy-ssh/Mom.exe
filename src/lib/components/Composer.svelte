@@ -6,6 +6,7 @@
 	import { heuristicExtract, DISTURBANCE_LABEL } from '$lib/engine/extract';
 	import type { QuickBand } from '$lib/storage/types';
 	import GooeyToggle from './GooeyToggle.svelte';
+	import { idleLabel, noteReady, noteShortfall, readyLabel } from '$lib/engine/prompt-rules';
 
 	let {
 		busy = false,
@@ -44,6 +45,16 @@
 		return () => clearInterval(timer);
 	});
 
+	// she greets you differently depending on the hour
+	let hour = $state(new Date().getHours());
+	$effect(() => {
+		const timer = setInterval(() => (hour = new Date().getHours()), 60000);
+		return () => clearInterval(timer);
+	});
+
+	const tooShort = $derived(text.trim().length > 0 && !noteReady(text));
+	const shortfall = $derived(noteShortfall(text));
+
 	const patch = $derived(heuristicExtract(debounced));
 
 	const chips = $derived.by(() => {
@@ -81,6 +92,8 @@
 
 	async function submit(): Promise<void> {
 		if (busy) return;
+		// the button reads what is typed, but guard here too: Enter must not bypass it
+		if (text.trim().length > 0 && !noteReady(text)) return;
 		const ok = await onsubmit({ text, quick, removedKeys: removed });
 		if (ok) {
 			text = '';
@@ -163,21 +176,22 @@
 		<button
 			type="button"
 			class="btn !bg-orange !text-paper !rounded-full px-7 py-3 flex items-center gap-2 text-sm font-black uppercase tracking-wide"
-			disabled={busy}
+			disabled={busy || tooShort}
 			onclick={() => void submit()}
 		>
 			{#if busy}
 				<LoaderCircle class="w-4 h-4 animate-spin" />
 				reading it{waited > 2 ? `, ${waited}s` : ''}...
 			{:else}
-				{#if text.trim().length === 0}
-					no notes? just plan my day
-				{:else}
-					Ask Mom
-				{/if}
+				{noteReady(text) ? readyLabel(hour) : idleLabel(hour)}
 				<Send class="w-4 h-4" />
 			{/if}
 		</button>
+		{#if tooShort}
+			<p class="text-center text-[11px] font-bold text-brown mt-2">
+				{shortfall} more character{shortfall === 1 ? '' : 's'} and mom is listening.
+			</p>
+		{/if}
 		{#if busy}
 			<p class="text-center text-[11px] font-semibold text-mute mt-2 max-w-xs mx-auto">
 				hosted open-weight models think for 10-25s before answering. if it takes too long,

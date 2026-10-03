@@ -5,6 +5,7 @@
 	import X from 'lucide-svelte/icons/x';
 	import LoaderCircle from 'lucide-svelte/icons/loader-circle';
 	import type { Message } from '$lib/storage/types';
+	import { chatReady } from '$lib/engine/prompt-rules';
 
 	let {
 		open = false,
@@ -72,7 +73,8 @@
 
 	async function send(): Promise<void> {
 		const text = draft.trim();
-		if (!text || busy) return;
+		// one letter is enough in a conversation, but blank and whitespace never are
+		if (!chatReady(text) || busy) return;
 		draft = '';
 		await onsubmit(text);
 	}
@@ -162,6 +164,7 @@
 						type="button"
 						class="btn !bg-orange !text-paper !rounded-full px-5 py-3 flex items-center gap-2 shrink-0"
 						disabled={busy || draft.trim().length === 0}
+						aria-label="send to mom"
 						onclick={() => void send()}
 					>
 						{#if busy}<LoaderCircle class="w-4 h-4 animate-spin" />{:else}<Send class="w-4 h-4" />{/if}

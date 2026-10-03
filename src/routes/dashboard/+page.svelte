@@ -445,7 +445,7 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 					</p>
 				</div>
 			{:else if plan}
-				<Timeline {plan} {now} tz={profile.timezone} {marks} busy={busy} onmark={markBlock} onreplan={() => void runOneShot(null, null, [])} />
+				<Timeline {plan} {now} tz={profile.timezone} {marks} busy={busy} onmark={markBlock} />
 			{:else}
 				<div class="grid place-items-center gap-4 py-8 text-center">
 					<Mascot size={220} labels={false} />

@@ -1,7 +1,6 @@
 <script lang="ts">
 	import TriangleAlert from 'lucide-svelte/icons/triangle-alert';
 	import WifiOff from 'lucide-svelte/icons/wifi-off';
-	import RotateCcw from 'lucide-svelte/icons/rotate-ccw';
 	import ChevronDown from 'lucide-svelte/icons/chevron-down';
 	import Check from 'lucide-svelte/icons/check';
 	import X from 'lucide-svelte/icons/x';
@@ -21,8 +20,7 @@
 		tz,
 		marks = {},
 		busy = false,
-		onmark,
-		onreplan
+		onmark
 	}: {
 		plan: Plan;
 		now: Date;
@@ -30,7 +28,6 @@
 		marks: Record<string, 'yes' | 'no'>;
 		busy?: boolean;
 		onmark: (block: PlanBlock, followed: 'yes' | 'no') => void;
-		onreplan: () => void;
 	} = $props();
 
 	let expanded = $state(false);
@@ -294,11 +291,5 @@
 			</div>
 		{/if}
 
-		<div class="flex justify-center pt-1">
-			<button type="button" class="btn !rounded-full px-5 py-2 text-xs flex items-center gap-2" onclick={onreplan}>
-				<RotateCcw class="w-3.5 h-3.5" />
-				Replan from now
-			</button>
-		</div>
 	</div>
 </div>

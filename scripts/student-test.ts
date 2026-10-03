@@ -174,6 +174,13 @@ const CASES: Case[] = [
 		want: 'plan'
 	},
 	{
+		name: 'genuinely rough day, mum must not be funny',
+		asIf: 'i am not okay today and i need her to just be my mum',
+		note: 'honestly i have been really anxious all week and i keep feeling low about everything',
+		clock: '2026-10-03T22:30:00+05:30',
+		want: 'chat'
+	},
+	{
 		name: 'typo heavy, no punctuation',
 		asIf: 'i text like this when i am lazy',
 		note: 'slept like 4 hrs skipped dinner too what now',
@@ -265,6 +272,38 @@ for (const c of CASES) {
 	const isQuestion = /^(why|how come|how do i|what should i|should i|is it|am i)\b/i.test(c.note ?? '');
 	if (isQuestion && reply.length < 20) problems.push(`${c.name}: question was not actually answered`);
 
+	// mum-signature markers: does this sound like somebody who knows you, or like a service?
+	const MUM_MARK = /\b(beta|love|theek|chai|laptop|1am|we both know|of course|oh come on|ha\.|ha\b|scoff|bunk|hostel|mess|mum)\b/i;
+	// blunt, clipped phrasing that no chatbot writes
+	const MUM_TONE =
+		/(\bso\b[^.]*\b(now|today|tonight)\b)|(\bthat'll do\b)|(adjust accordingly)|(no gym)|(get to bed)|(off tonight)|(that one didn't happen)|(we didn't get to)|(gym's out)|(keep it simple)|(don't get to)/i;
+	const GENERIC_MARK = /\b(Additionally|Furthermore|However|Overall|I recommend|It is important|Let me know if|In conclusion|Remember to|It would be advisable)\b/;
+	// the exact openers the prompt bans, heard from the first word
+	const OPENER_MARK = /^\W*(I'm sorry|I understand|It sounds like|I hear you|That must have been|It's okay to feel|You're doing okay|Remember to|It's important to|I know the plan|I see you|Let's|Great to hear|It looks like)/i;
+	// the exact scorekeeper constructions the prompt bans
+	const GRADER_MARK = /\b(you (missed|failed|skipped|didn't|should have|neglected|wasted|were supposed))\b/i;
+	// a plan reply has no "advice", so judge her voice off the summary + why fields too
+	const voiceText = [reply, parsed.plan?.summary ?? '', ...(parsed.plan?.blocks.map((b) => `${b.detail} ${b.why}`) ?? [])].join(' ');
+
+	const theVoice = MUM_MARK.test(voiceText) || MUM_TONE.test(voiceText);
+	const generic = GENERIC_MARK.test(voiceText);
+	if (generic) problems.push(`${c.name}: reads like a generic assistant -> ${voiceText.slice(0, 70)}`);
+	if (OPENER_MARK.test(reply)) problems.push(`${c.name}: chatbot opener -> ${reply.slice(0, 60)}`);
+	if (GRADER_MARK.test(reply)) problems.push(`${c.name}: scorekeeper language -> ${reply.slice(0, 60)}`);
+	// only flag missing character on the cases where she is actually speaking
+	if (reply.length > 0 && !theVoice) problems.push(`${c.name}: no mum fingerprint -> ${voiceText.slice(0, 60)}`);
+
+	// the voice must be mum-like without tipping into cruelty or corporate speak
+	const CRUEL_RE = /\b(useless|pathetic|worthless|disgusting|idiot|loser|you are a failure|shame on)\b/i;
+	const CORPORATE_RE = /(I understand how you feel|it sounds like you|I hope this helps|as an AI|Let me know if you need|great question)/i;
+	const CRUEL_VULN = /(panic|anxiety attack|lonely|depressed|hopeless|grief|mum passed|died|no money|scared)/i;
+
+	// taunting is only allowed when the student is not actually hurting
+	const vulnerable = CRUEL_VULN.test(`${c.note ?? ''} ${reply}`);
+	if (CRUEL_RE.test(reply)) problems.push(`${c.name}: cruel -> ${reply.slice(0, 70)}`);
+	if (CORPORATE_RE.test(reply)) problems.push(`${c.name}: corporate voice -> ${reply.slice(0, 70)}`);
+	if (vulnerable && CRUEL_RE.test(reply)) problems.push(`${c.name}: taunted someone who is hurting`);
+
 	const shamed = SHAME_RE.test(reply);
 	const dwelling = PAST_RE.test(reply);
 	if (shamed) problems.push(`${c.name}: reply sounds like blame -> ${reply.slice(0, 70)}`);
@@ -279,9 +318,18 @@ for (const c of CASES) {
 		if (shape.totalMinutes > 0 && Math.abs(share - 1) > 1e-6) problems.push(`${c.name}: shape does not sum to 1`);
 	}
 
-	console.log(`${intentOk && !shamed && !dwelling ? 'PASS' : 'WARN'}  ${c.name}`);
+	// she has to sound like mum on every speaking turn, so a missing fingerprint is a fail
+	const voiceOk =
+		!CRUEL_RE.test(reply) &&
+		!CORPORATE_RE.test(reply) &&
+		!(vulnerable && CRUEL_RE.test(reply)) &&
+		!generic &&
+		!OPENER_MARK.test(reply) &&
+		!GRADER_MARK.test(reply) &&
+		theVoice;
+	console.log(`${intentOk && !shamed && !dwelling && voiceOk ? 'PASS' : 'WARN'}  ${c.name}`);
 	console.log(`      i would type: "${c.note ?? '(pressed the button)'}"`);
-	console.log(`      read as: ${parsed.intent} ${parsed.handoff ? `(handoff: ${parsed.handoff})` : ''} [${source}] (model said: ${declared})`);
+	console.log(`      read as: ${parsed.intent} ${parsed.handoff ? `(handoff: ${parsed.handoff})` : ''} [${source}] (model said: ${declared})${theVoice ? ' [mum voice]' : ''}`);
 	if (reply) console.log(`      she says: ${reply.length > 150 ? reply.slice(0, 150) + '...' : reply}`);
 	if (parsed.plan) {
 		console.log(`      plan: ${parsed.plan.blocks.length} blocks, first "${parsed.plan.blocks[0].action}" at ${parsed.plan.blocks[0].start}`);

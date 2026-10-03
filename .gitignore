@@ -6,3 +6,16 @@ node_modules
 .env.*
 !.env.example
 vite.config.ts.timestamp-*
+
+# supabase cli: .temp holds a real access token, never commit it
+supabase/.temp
+supabase/.branches
+supabase/.env
+
+# kept local only, on purpose. it holds no secrets (plain DDL), but the schema is applied
+# by hand in the supabase SQL editor, so the repo does not need to carry it.
+supabase/migrations/0002_messages.sql
+
+# tooling scratch
+.codegraph
+*.log

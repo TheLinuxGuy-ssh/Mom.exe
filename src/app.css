@@ -160,6 +160,37 @@ body {
 	box-shadow: 0 1px 2px rgba(33, 23, 19, 0.25);
 }
 
+/*
+ * The quiet sibling of .sticky-note. Used when the note is meant to be overheard rather than
+ * read: mom leaning in from the corner, not pinning something to the fridge. Deliberately
+ * softer than the sticky note it sits beside, because it is competing with it for the same
+ * eye, and it loses on purpose: no hard shadow, no tape, no saturated fill.
+ */
+.whisper-note {
+	background: color-mix(in oklab, var(--color-paper) 82%, transparent);
+	border: 1px dashed color-mix(in oklab, var(--color-brown) 38%, transparent);
+	border-radius: 0.9rem;
+	box-shadow: 0 2px 10px rgba(33, 23, 19, 0.07);
+	backdrop-filter: blur(2px);
+	font-family: var(--font-hand);
+	font-weight: 600;
+	color: color-mix(in oklab, var(--color-brown) 82%, transparent);
+	padding: 0.7rem 0.85rem;
+	position: relative;
+}
+
+/* the little fold, the quiet equivalent of the tape */
+.whisper-note::after {
+	content: '';
+	position: absolute;
+	top: 0.45rem;
+	right: 0.5rem;
+	width: 1.6rem;
+	height: 1px;
+	background: color-mix(in oklab, var(--color-brown) 28%, transparent);
+	transform: rotate(-6deg);
+}
+
 mark.hl {
 	--hl: var(--color-yellow);
 	position: relative;
