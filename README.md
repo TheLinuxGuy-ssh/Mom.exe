@@ -1,6 +1,6 @@
 <div align="center">
 
-<img alt="Mom.exe logo, a steaming mug" src="https://raw.githubusercontent.com/TheLinuxGuy-ssh/Mom.exe/main/static/favicon.svg" width="120">
+<img alt="Mom.exe logo, a steaming mug" src="https://raw.githubusercontent.com/thelinuxguy-ssh/mom.exe/static/showcase.gif" width="120">
 
 <h1>Mom.exe</h1>
 
