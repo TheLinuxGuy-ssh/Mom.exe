@@ -1,10 +1,6 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/TheLinuxGuy-ssh/Mom.exe/main/.github/assets/logo-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/TheLinuxGuy-ssh/Mom.exe/main/.github/assets/logo-light.svg">
-  <img alt="Mom.exe logo, a steaming mug" src="https://raw.githubusercontent.com/TheLinuxGuy-ssh/Mom.exe/main/.github/assets/logo-light.svg" width="120">
-</picture>
+<img alt="Mom.exe logo, a steaming mug" src="https://raw.githubusercontent.com/TheLinuxGuy-ssh/Mom.exe/main/static/favicon.svg" width="120">
 
 <h1>Mom.exe</h1>
 
@@ -33,7 +29,7 @@
 </div>
 
 <p align="center">
-  <img alt="The Mom.exe dashboard showing a plan timeline for the current hour, a conversation with the coach, and widgets for sleep, meals, and how the day stacks up" src="https://raw.githubusercontent.com/TheLinuxGuy-ssh/Mom.exe/main/.github/assets/dashboard-demo.gif" width="880">
+  <img alt="The Mom.exe dashboard showing a plan timeline for the current hour, a conversation with the coach, and widgets for sleep, meals, and how the day stacks up" src="https://raw.githubusercontent.com/TheLinuxGuy-ssh/Mom.exe/main/static/showcase.gif" width="1000">
 </p>
 
 ## What it is
@@ -310,7 +306,7 @@ Set these as Vercel environment variables for both Preview and Production, then 
 
 `NIM_API_KEY` must **not** be a Vercel build variable. Only `VITE_*` variables reach the browser, and the key is read only by the Supabase edge function.
 
-Two post deploy chores: set your real domain in `src/app.html`, `static/robots.txt`, and `static/sitemap.xml`, since `momexe.vercel.app` is currently a placeholder. Then upload `static/og-image.png` under repo Settings then Social preview.
+One post deploy chore: upload `static/og-image.png` under repo Settings then Social preview, so link previews show the thumbnail instead of the README. The domain is already set in `src/app.html`, `static/robots.txt` and `static/sitemap.xml`.
 
 ## Troubleshooting
 
@@ -427,7 +423,7 @@ that decides what she "meant" is the kind of thing that quietly ruins everything
 
 Link previews read tags from `src/app.html` and never run JavaScript, so the Open Graph and Twitter Card tags live there rather than in `svelte:head`.
 
-- Replace every `https://momexe.vercel.app` in `src/app.html` with your real URL, covering canonical, `og:url`, `og:image`, and `twitter:image`.
+- The URL is already `https://momexe.vercel.app` across `canonical`, `og:url`, `og:image` and `twitter:image`. If you ever move it, change all four together — a canonical pointing somewhere else than the OG tags splits the signal.
 - `static/og-image.svg` is the thumbnail source of truth at 1200x630. Edit it, then run `npm run og` to regenerate the PNG, since crawlers render the PNG.
 - `static/favicon.svg` is the logo, the wobbling mug, also used as the apple touch icon. Replace it freely.
 - Update the domain in `static/robots.txt` and `static/sitemap.xml`.
