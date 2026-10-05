@@ -12,6 +12,14 @@ export interface ChatEntry {
 	kind: 'chat';
 	at: string;
 	date: string;
+	/** null for conversations written before sessions existed, which group by day */
+	sessionId: string | null;
+	/**
+	 * True when the session contains a planning exchange rather than only talking. A session where
+	 * the day got rearranged is a different thing on the fridge door from a conversation, and it
+	 * was being labelled and drawn as one.
+	 */
+	isPlan: boolean;
 	messages: Message[];
 }
 
@@ -29,10 +37,12 @@ export function buildHistory(
 	const planEntries: PlanEntry[] =
 		tab === 'chats' ? [] : plans.map((plan) => ({ kind: 'plan' as const, at: plan.created_at, plan }));
 
+	// 'replan' belongs in here too. It was left out, which meant a planning exchange showed only
+	// the student's side of it, because her answer is the line logged as the replan.
 	const chatEntries: ChatEntry[] =
 		tab === 'plans'
 			? []
-			: groupChats(messages.filter((m) => m.kind === 'chat' || m.kind === 'note'));
+			: groupChats(messages.filter((m) => m.kind === 'chat' || m.kind === 'note' || m.kind === 'replan'));
 
 	const entries: HistoryEntry[] = [...planEntries, ...chatEntries].sort((a, b) =>
 		a.at < b.at ? 1 : a.at > b.at ? -1 : 0
@@ -50,20 +60,33 @@ export function buildHistory(
 	return { entries, hasAnything, emptyReason };
 }
 
+/**
+ * One entry per session, not per day. Someone who opens the app twice in an evening had two
+ * conversations, and reading them as a single unbroken one is a lie about what happened: the
+ * second chat started with the screen empty. Rows from before sessions existed have no session
+ * id, so they fall back to grouping by day, which is how they were already being read.
+ */
 function groupChats(messages: Message[]): ChatEntry[] {
-	const byDate = new Map<string, Message[]>();
+	const bySession = new Map<string, Message[]>();
 	for (const m of messages) {
-		const list = byDate.get(m.local_date) ?? [];
+		const key = m.session_id ?? `date:${m.local_date}`;
+		const list = bySession.get(key) ?? [];
 		list.push(m);
-		byDate.set(m.local_date, list);
+		bySession.set(key, list);
 	}
-	return [...byDate.entries()]
-		.map(([date, list]) => ({
-			kind: 'chat' as const,
-			at: list[0]?.created_at ?? `${date}T00:00:00.000Z`,
-			date,
-			messages: list.sort((a, b) => (a.created_at < b.created_at ? -1 : 1))
-		}))
+	return [...bySession.values()]
+		.map((list) => {
+			const sorted = list.sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+			const first = sorted[0];
+			return {
+				kind: 'chat' as const,
+				at: first?.created_at ?? `${first?.local_date ?? ''}T00:00:00.000Z`,
+				date: first?.local_date ?? '',
+				sessionId: first?.session_id ?? null,
+				isPlan: sorted.some((m) => m.kind === 'note' || m.kind === 'replan'),
+				messages: sorted
+			};
+		})
 		.sort((a, b) => (a.at < b.at ? 1 : -1));
 }
 

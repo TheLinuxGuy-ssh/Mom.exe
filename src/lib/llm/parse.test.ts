@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractJsonText, tryParseJson } from './parse';
+import { extractJsonText, tryParseJson, salvageAdvice } from './parse';
 import { PlanOutputSchema, ExtractionSchema } from './schema';
 
 describe('parse', () => {
@@ -58,5 +58,29 @@ describe('schemas', () => {
 		const res = ExtractionSchema.safeParse({ sleep_hours: 6, slept_at: null, woke_at: null, meals: null, mood: null, quick: 'okay', disturbances: [], deadline_notes: null });
 		expect(res.success).toBe(true);
 		expect(ExtractionSchema.safeParse({ sleep_hours: 99, slept_at: null, woke_at: null, meals: null, mood: null, quick: null, disturbances: [], deadline_notes: null }).success).toBe(false);
+	});
+});
+
+describe('salvaging a reply from a broken envelope', () => {
+	/**
+	 * The model writes the reply first and the JSON around it second. Both of these came back from a
+	 * live run, both are unparseable, and both contain a perfectly good reply that was about to be
+	 * thrown away in favour of the deterministic planner.
+	 */
+	it('finds the words inside malformed JSON', () => {
+		const strayQuote =
+			'{"intent":"chat","understanding":"sleep_hours":3,"advice":"the 2am visit was loud. drink some water now","plan":null}';
+		expect(salvageAdvice(strayQuote)).toBe('the 2am visit was loud. drink some water now');
+	});
+
+	it('unescapes a reply that came with escapes in it', () => {
+		expect(salvageAdvice('{"advice":"eat something\\nthen rest"}')).toBe('eat something then rest');
+		expect(salvageAdvice('{"advice":"she said \\"hi\\" first"}')).toBe('she said "hi" first');
+	});
+
+	it('has nothing to say when there is no reply in there', () => {
+		expect(salvageAdvice('{"intent":"plan","plan":{"summary":"x"}}')).toBeNull();
+		expect(salvageAdvice('{"advice":""}')).toBeNull();
+		expect(salvageAdvice('not json at all')).toBeNull();
 	});
 });

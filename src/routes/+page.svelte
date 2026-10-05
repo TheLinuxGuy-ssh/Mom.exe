@@ -6,7 +6,7 @@
 	import Marquee from '$lib/components/Marquee.svelte';
 	import { getSession } from '$lib/auth/session';
 
-	const REPO_URL = 'https://github.com/yourname/mom-exe';
+	const REPO_URL = 'https://github.com/thelinuxguy-ssh/mom.exe';
 </script>
 
 <svelte:head>

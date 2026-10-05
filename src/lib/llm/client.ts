@@ -54,7 +54,7 @@ async function readBody(res: Response): Promise<unknown> {
 export async function chat(
 	config: LLMConfig,
 	messages: ChatMessage[],
-	opts: { temperature?: number; timeoutMs?: number; authToken?: string } = {}
+	opts: { temperature?: number; timeoutMs?: number; maxTokens?: number; authToken?: string } = {}
 ): Promise<string> {
 	const { temperature = 0.4, authToken } = opts;
 	const timeoutMs = opts.timeoutMs ?? config.timeoutMs ?? 30000;
@@ -69,7 +69,7 @@ export async function chat(
 		model: config.model,
 		messages,
 		temperature,
-		max_tokens: config.maxTokens ?? 1200,
+		max_tokens: opts.maxTokens ?? config.maxTokens ?? 1200,
 		stream: false
 	};
 	if (config.reasoningEffort && config.reasoningEffort !== 'medium') {
@@ -143,8 +143,11 @@ export async function testConnection(config: LLMConfig, authToken?: string): Pro
 	if (config.mode === 'proxy' && !authToken) {
 		return { ok: false, detail: 'hosted mode needs a signed-in account first.' };
 	}
+	// The edge function answers GET on its own path with { ok: true }. There is no /health route,
+	// so appending one turned a working deployment into a permanent 404 and made the in-app
+	// connection test report failure for a proxy that was fine.
 	const url =
-		config.mode === 'proxy' ? `${config.url.replace(/\/$/, '')}/health` : `${config.url.replace(/\/$/, '')}/models`;
+		config.mode === 'proxy' ? config.url.replace(/\/$/, '') : `${config.url.replace(/\/$/, '')}/models`;
 	try {
 		const headers: Record<string, string> = {};
 		if (authToken) headers['Authorization'] = `Bearer ${authToken}`;

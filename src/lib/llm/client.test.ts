@@ -138,4 +138,12 @@ describe('testConnection', () => {
 		const res = await testConnection(proxyConfig, 'jwt');
 		expect(res.ok).toBe(true);
 	});
+
+	it('asks the function for its own path, since it has no /health route', async () => {
+		// the function answers GET /plan with { ok: true }. Requesting /plan/health returns 404 on a
+		// perfectly healthy deployment, which made this test always report failure.
+		const fn = mockFetch(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+		await testConnection(proxyConfig, 'jwt');
+		expect(callArgs(fn, 0)[0]).toBe('https://project.supabase.co/functions/v1/plan');
+	});
 });

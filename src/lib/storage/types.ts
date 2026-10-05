@@ -107,6 +107,12 @@ export type MessageKind = 'chat' | 'note' | 'replan';
  * The conversation log. Every note sent to mom and every reply she gives, so that chat and
  * planning share one memory. `kind` distinguishes a plain conversation from a planning
  * exchange, which keeps the history page able to filter without parsing text.
+ *
+ * `session_id` is which app visit the line was written in. One session per opening the app: the
+ * chat box starts empty every time, and two chats on the same afternoon are two conversations in
+ * the history rather than one long one. It does NOT divide her memory. The context engine still
+ * reads the last 20 messages across every session, so closing the app loses the transcript on
+ * screen and nothing else. Null on rows written before sessions existed.
  */
 export interface Message {
 	id: string;
@@ -116,9 +122,12 @@ export interface Message {
 	kind: MessageKind;
 	content: string;
 	created_at: string;
+	session_id: string | null;
 }
 
-export type MessageInput = Omit<Message, 'id' | 'user_id' | 'created_at'>;
+export type MessageInput = Omit<Message, 'id' | 'user_id' | 'created_at' | 'session_id'> & {
+	session_id?: string | null;
+};
 
 /**
  * A compressed stand-in for messages that have aged out of the context window, so mom keeps

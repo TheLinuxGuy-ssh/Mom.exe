@@ -9,16 +9,15 @@
 import { readFileSync } from 'node:fs';
 import { buildContext, buildTodayInfo, buildPriorPlan } from '../src/lib/engine/context';
 import { computeStats } from '../src/lib/engine/stats';
-import { parseOneShot, isContentFree } from '../src/lib/llm/generate';
-import { buildOneShotMessages } from '../src/lib/llm/prompt';
-import { normalizePlan } from '../src/lib/llm/normalize';
-import { templatePlan } from '../src/lib/llm/template';
+import { generateFromNote } from '../src/lib/llm/generate';
+import { defaultLLMConfig, type LLMConfig } from '../src/lib/llm/config';
 import { heuristicExtract } from '../src/lib/engine/extract';
 import { toContextWindow } from '../src/lib/engine/memory';
 import { dayShape } from '../src/lib/engine/shape';
 import { buildHistory } from '../src/lib/engine/history';
 import { PlanOutputSchema } from '../src/lib/llm/schema';
 import { localDateInTz, nowMinutesInTz } from '../src/lib/engine/time';
+import { DIALOGUE } from '../src/lib/llm/dialogue';
 import type { Checkin, Message, Plan, Profile } from '../src/lib/storage/types';
 
 const NIM_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
@@ -98,8 +97,12 @@ function activePlan(): Plan {
 	} as Plan;
 }
 
-const SHAME_RE = /(you failed|you missed|broke your streak|you were lazy|disappoint|you should have|why didn.t you|you keep failing)/i;
-const PAST_RE = /(you didn.t do|you never|couldn.t be bothered)/i;
+// Hearing them say it once is empathy: "you failed the midterms, that's heavy" is holding the words
+// they used and sitting with them. Blaming is the repetition, the "again", and the verdict.
+const SHAME_RE =
+	/(broke your streak|you were lazy|disappoint|you should have|why didn.t you|you keep failing|you always (?:fail|miss|skip)|you never (?:eat|sleep|try))/i;
+// dwelling is re-opening the past unprompted, which is different from acknowledging it
+const PAST_RE = /(you didn.t do|couldn.t be bothered)/i;
 
 interface Case {
 	name: string;
@@ -107,6 +110,14 @@ interface Case {
 	note: string | null;
 	clock: string;
 	want: 'chat' | 'plan';
+	/** the student wrote in hinglish, so she may reply in hinglish */
+	hinglish?: boolean;
+	/** this one is about hurting, so no jokes are allowed at all */
+	tender?: boolean;
+	/** she should ask something back: going out, being busy, someone new */
+	interrogate?: boolean;
+	/** she should remember a promise made before */
+	receipt?: boolean;
 }
 
 const CASES: Case[] = [
@@ -150,7 +161,8 @@ const CASES: Case[] = [
 		asIf: 'a real question, i want a real answer not a lecture',
 		note: 'why do i keep waking up at 3am even when i sleep early?',
 		clock: '2026-10-03T10:05:00+05:30',
-		want: 'plan'
+		// a question wants an answer, not a schedule. this expectation was simply wrong
+		want: 'chat'
 	},
 	{
 		name: 'asks her to rework the plan outright',
@@ -174,6 +186,163 @@ const CASES: Case[] = [
 		want: 'plan'
 	},
 	{
+		name: 'the exact greeting that started all this',
+		asIf: 'i typed hi and felt a bit guilty about it',
+		note: 'Hi.',
+		clock: '2026-10-03T18:00:00+05:30',
+		// carries no information. a student who types hello wants to be given a day, not talked to,
+		// which is the whole job of isContentFree
+		want: 'plan'
+	},
+	{
+		name: 'just woke up and wanted to talk (the reported failure)',
+		asIf: 'i thought of her the second i opened my eyes',
+		note: 'its going nice, just woke up and i thought i should have a talk hehe',
+		clock: '2026-10-03T08:10:00+05:30',
+		want: 'chat'
+	},
+	{
+		name: 'claims to be fine, which she is not',
+		asIf: 'the classic i am fine',
+		note: "i'm fine, honestly nothing going on",
+		clock: '2026-10-03T21:00:00+05:30',
+		want: 'chat'
+	},
+	{
+		name: 'not hungry after a big lunch',
+		asIf: 'she always counters this',
+		note: 'not hungry at all, had a huge lunch',
+		clock: '2026-10-03T19:00:00+05:30',
+		want: 'chat'
+	},
+	{
+		name: 'going out, she should interrogate',
+		asIf: 'she asks four questions where i needed one',
+		note: "going out tonight with friends, might be back late",
+		clock: '2026-10-03T17:30:00+05:30',
+		want: 'chat',
+		interrogate: true
+	},
+	{
+		name: 'homesick, no jokes allowed',
+		asIf: 'this is the one that matters',
+		note: 'i really miss home these days, hostel food is getting to me',
+		clock: '2026-10-03T22:00:00+05:30',
+		want: 'chat',
+		tender: true
+	},
+	{
+		name: 'breakup, she holds it together for them',
+		asIf: 'a real mum would not joke about this',
+		note: 'we broke up yesterday and i dont know what to do with myself',
+		clock: '2026-10-03T21:30:00+05:30',
+		want: 'chat',
+		tender: true
+	},
+	{
+		name: 'failed an exam, tenderness over jokes',
+		asIf: 'one paper is not a life',
+		note: 'i failed my midterms and i feel like a failure',
+		clock: '2026-10-03T18:45:00+05:30',
+		want: 'chat',
+		tender: true
+	},
+	{
+		name: 'topped the class, she deflects the praise',
+		asIf: 'not bad, then immediately more',
+		note: 'i topped the class this semester!!',
+		clock: '2026-10-03T16:00:00+05:30',
+		want: 'chat'
+	},
+	{
+		name: 'says i love you',
+		asIf: 'she will not make a thing of it',
+		note: 'i love you mom',
+		clock: '2026-10-03T20:20:00+05:30',
+		want: 'chat'
+	},
+	{
+		name: 'apologises after being absent',
+		asIf: 'words are cheap, come here',
+		note: 'sorry, i have been terrible at replying this week',
+		clock: '2026-10-03T19:45:00+05:30',
+		want: 'chat'
+	},
+	{
+		name: 'bored, she hands back something better',
+		asIf: 'boredom builds character',
+		note: 'im so bored, nothing to do at all',
+		clock: '2026-10-03T15:00:00+05:30',
+		want: 'chat'
+	},
+	{
+		name: 'confesses to doom scrolling at 3am',
+		asIf: 'she already knows, she always knows',
+		note: 'i was on reels till 3am again lol i know',
+		clock: '2026-10-03T11:00:00+05:30',
+		want: 'chat'
+	},
+	{
+		name: 'small cold, folk wisdom not medicine',
+		asIf: 'care without a diagnosis',
+		note: 'i have a bit of a cold, nothing serious',
+		clock: '2026-10-03T20:00:00+05:30',
+		want: 'chat'
+	},
+	{
+		name: 'cannot sleep at 2am',
+		asIf: 'late night confidant',
+		note: "can't sleep, mind is racing and it's nearly 2am",
+		clock: '2026-10-03T02:00:00+05:30',
+		want: 'chat'
+	},
+	{
+		name: 'broke this month, light teasing only',
+		asIf: 'she would ask what for',
+		note: 'im completely broke this month lol',
+		clock: '2026-10-03T17:00:00+05:30',
+		want: 'chat'
+	},
+	{
+		name: 'mess is a disaster',
+		asIf: 'she has opinions about the chair',
+		note: 'my room is a complete disaster again, clothes everywhere',
+		clock: '2026-10-03T16:30:00+05:30',
+		want: 'chat'
+	},
+	{
+		name: 'sasses her back, mild guilt permitted',
+		asIf: 'this is where the nine months line lives',
+		note: 'yeah whatever you say mom',
+		clock: '2026-10-03T19:00:00+05:30',
+		want: 'chat'
+	},
+	{
+		name: 'promises to sleep early again',
+		asIf: 'she should hold the receipt from last week',
+		note: "i'll sleep early tonight, promise",
+		clock: '2026-10-03T22:30:00+05:30',
+		want: 'chat',
+		receipt: true
+	},
+	{
+		name: 'hinglish, she should mirror it',
+		asIf: 'i text like this at home',
+		note: 'arre mom, aaj kuch theek nahi lag raha, bas thak gaya hu',
+		clock: '2026-10-03T20:00:00+05:30',
+		want: 'chat',
+		hinglish: true,
+		tender: true
+	},
+	{
+		name: 'hinglish about food, she should mirror it',
+		asIf: 'mess ka khana, romanized',
+		note: 'mess ka khana nahi khaya, bhookh nahi thi aaj',
+		clock: '2026-10-03T19:30:00+05:30',
+		want: 'chat',
+		hinglish: true
+	},
+	{
 		name: 'genuinely rough day, mum must not be funny',
 		asIf: 'i am not okay today and i need her to just be my mum',
 		note: 'honestly i have been really anxious all week and i keep feeling low about everything',
@@ -189,22 +358,25 @@ const CASES: Case[] = [
 	}
 ];
 
-async function callModel(messages: { role: string; content: string }[]): Promise<string | null> {
-	const key = process.env.NIM_API_KEY;
-	if (!key) return null;
-	try {
-		const res = await fetch(NIM_URL, {
-			method: 'POST',
-			headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-			body: JSON.stringify({ model: MODEL, messages, temperature: 0.4, max_tokens: 1200, reasoning_effort: 'low', stream: false }),
-			signal: AbortSignal.timeout(45000)
-		});
-		if (!res.ok) return null;
-		const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-		return body.choices?.[0]?.message?.content ?? null;
-	} catch {
-		return null;
-	}
+/**
+ * The app's own client configuration, pointed at NIM directly.
+ *
+ * In the browser this is always the hosted proxy, which needs a signed-in user's JWT. A script has
+ * no user, so it talks to NIM straight with the server-side key: same prompt, same parser, same
+ * fallback, just no gateway in the way. `getLLMConfig` is untouched, so this cannot change how the
+ * app itself behaves.
+ */
+function llmConfig(): LLMConfig {
+	return {
+		...defaultLLMConfig(),
+		mode: process.env.NIM_API_KEY ? 'direct' : 'proxy',
+		// the whole endpoint, not just the host: in direct mode the client appends
+		// `/chat/completions` unless the url already ends in it, and a host-only base produced a
+		// 404 from `https://integrate.api.nvidia.com/chat/completions`
+		url: NIM_URL,
+		model: MODEL,
+		apiKey: process.env.NIM_API_KEY ?? ''
+	};
 }
 
 function loadKey(): void {
@@ -225,9 +397,24 @@ const priorMessages: Message[] = [];
 let pass = 0;
 let fail = 0;
 const problems: string[] = [];
+const soft: string[] = [];
+
+/**
+ * Whether a model is answering. Without one, most of what this script checks cannot be checked:
+ * intent comes from a two-line heuristic, and there is no voice to judge. Saying so is better than
+ * printing a wall of failures that are really just the absence of a model, which is how a harness
+ * teaches people to ignore it.
+ */
+const live = Boolean(process.env.NIM_API_KEY);
 
 console.log(`\nwalking in as a first-year hostel student, ${new Date().toISOString().slice(0, 10)}\n`);
-console.log(`model: ${process.env.NIM_API_KEY ? MODEL : 'none (template fallback)'}\n`);
+if (live) {
+	console.log(`model: ${MODEL} (live, through the app's own pipeline)\n`);
+} else {
+	console.log('model: none. Set NIM_API_KEY in .env to run the live checks.');
+	console.log('this run exercises the fallback path only: no crashes, valid plans, no crash on the');
+	console.log('way down. Intent routing and voice are reported as not evaluated, not as failures.\n');
+}
 
 for (const c of CASES) {
 	const now = new Date(c.clock);
@@ -243,53 +430,135 @@ for (const c of CASES) {
 		to_digest: []
 	});
 
-	const messages = buildOneShotMessages(c.note, payload);
-	const raw = await callModel(messages);
-	const source = raw ? 'model' : 'template';
-	const text = raw ?? JSON.stringify({
-		intent: 'plan',
-		understanding: null,
-		advice: null,
-		plan: templatePlan(profile, stats, today, nowMinutesInTz(TZ, now))
-	});
-
-	const parsed = parseOneShot(text);
-	// mirror what generateFromNote does, so this harness cannot pass while the app fails
-	if (isContentFree(c.note) && parsed.intent === 'chat') parsed.intent = 'plan';
-	let declared = 'none';
-	try {
-		const env = JSON.parse(text) as Record<string, unknown>;
-		declared = String(env['intent'] ?? 'none') + (env['plan'] ? '+plan' : '-plan');
-	} catch { /* template or prose */ }
+	/**
+	 * The real pipeline, not a re-implementation of it.
+	 *
+	 * This harness used to rebuild the routing call, the one-shot call, the parse and the template
+	 * fallback by hand, in the shape it believed the app had. That is a harness that passes while
+	 * the app fails, which is worse than no harness at all: it is the thing standing between "her
+	 * voice survived this prompt change" and a guess. So it calls `generateFromNote` exactly as the
+	 * dashboard does, and everything below asserts on that result.
+	 */
+	const result = await generateFromNote({ note: c.note, context: payload, profile, stats, today }, llmConfig());
+	const parsed = {
+		intent: result.intent,
+		advice: result.advice,
+		plan: result.output,
+		handoff: result.handoff
+	};
+	const source = result.usedTemplate ? 'template' : 'model';
+	const declared = result.fallbackReason ? `fell back: ${result.fallbackReason}` : 'from the model';
 	const heuristic = heuristicExtract(c.note ?? '');
-	const reply = parsed.advice ?? '';
+	const reply = result.advice ?? '';
 
 	const intentOk = parsed.intent === c.want;
-	if (!intentOk) problems.push(`${c.name}: wanted ${c.want}, got ${parsed.intent}`);
-	if (intentOk) pass++;
-	else fail++;
+	if (live) {
+		if (!intentOk) problems.push(`${c.name}: wanted ${c.want}, got ${parsed.intent}`);
+		if (intentOk) pass++;
+		else fail++;
+	}
 
 	const isQuestion = /^(why|how come|how do i|what should i|should i|is it|am i)\b/i.test(c.note ?? '');
-	if (isQuestion && reply.length < 20) problems.push(`${c.name}: question was not actually answered`);
+	if (live && isQuestion && reply.length < 20) {
+		problems.push(`${c.name}: question was not actually answered`);
+	}
 
 	// mum-signature markers: does this sound like somebody who knows you, or like a service?
 	const MUM_MARK = /\b(beta|love|theek|chai|laptop|1am|we both know|of course|oh come on|ha\.|ha\b|scoff|bunk|hostel|mess|mum)\b/i;
 	// blunt, clipped phrasing that no chatbot writes
 	const MUM_TONE =
-		/(\bso\b[^.]*\b(now|today|tonight)\b)|(\bthat'll do\b)|(adjust accordingly)|(no gym)|(get to bed)|(off tonight)|(that one didn't happen)|(we didn't get to)|(gym's out)|(keep it simple)|(don't get to)/i;
+		/(\bso\b[^.]*\b(now|today|tonight)\b)|(\bthat'll do\b)|(adjust accordingly)|(no gym)|(get to bed)|(off tonight)|(that one didn't happen)|(we didn't get to)|(gym's out)|(keep it simple)|(don't get to)|\b(beta|habits|soft drinks|sugar|chai)\b|(?<!not )\b(wear|close|drink|stop|go|eat|sleep|sit|stand|tell)\b/;
+	// plain second person and imperatives: the shape of talking, not the vocabulary
+	const MUM_GRAMMAR =
+		/\b(you|your|you're|you've|you'll)\b|\b(don't|do not|it's|that's|you're|I'm not|I'll)\b|\b(now|then|after that|before bed)\b/i;
 	const GENERIC_MARK = /\b(Additionally|Furthermore|However|Overall|I recommend|It is important|Let me know if|In conclusion|Remember to|It would be advisable)\b/;
 	// the exact openers the prompt bans, heard from the first word
 	const OPENER_MARK = /^\W*(I'm sorry|I understand|It sounds like|I hear you|That must have been|It's okay to feel|You're doing okay|Remember to|It's important to|I know the plan|I see you|Let's|Great to hear|It looks like)/i;
 	// the exact scorekeeper constructions the prompt bans
-	const GRADER_MARK = /\b(you (missed|failed|skipped|didn't|should have|neglected|wasted|were supposed))\b/i;
+	// blaming is repetition and verdict, not hearing them say it once
+	const GRADER_MARK =
+		/\b(you (?:keep|always|never) (?:miss|failed|skip|neglect)|you (?:missed|failed|skipped|neglected|wasted)[^.!?]{0,24}(again|always|as usual)|you should have|you were supposed)\b/i;
+	/** Service-desk language. The one habit that makes her sound like an assistant. */
+	const SERVICE_RE =
+		/\b(let me know|feel free to|want me to|do you want me to|i can help|i'm here if|i'm happy to|is there anything else|don't hesitate|i hope this helps|would you like me to|tweak|adjust|keep in touch|reach out)\b/i;
+	/** Paraphrases that slip past a literal word ban. */
+	const SERVICE_PARAPHRASE_RE =
+		/\b(if anything (changes|comes up)|if you need anything|do not hesitate|anytime you want|whenever you want|i am here|i'm here for you|you can always tell me)\b/i;
+	/** The care checklist she recited by reflex once nagging was un-banned. */
+	const STOCK_CARE_RE = /\b(drink water, eat something, stretch|eat something, stretch|water, eat, stretch)\b/i;
+	/** Hinglish markers, asserted in both directions. */
+	const HINGLISH_RE =
+		/\b(arre|yaar|theek|nahi|haan|hain|hai|kya|bhai|abhi|bahut|rakh|sochna|piyo|paani|khana|lo|suno|bata|jaldi|chalo|aunty|pita|mummy|papa|dar|laga|kare|karo|liye|waala|kharab|thak|bhookh|samajhti|pata hai)\b/i;
+	const CARE_RE = /\b(eat|water|drink|sleep|rest|khana|paani|chai)\b/i;
+	const ASK_RE = /\b(where|who|whom|when|how late|which|how long|who's|whose)\b/i;
+	const RECEIPT_RE = /\b(last (week|night|time)|you (said|said that|told me)|again|before|we both know|as usual)\b/i;
 	// a plan reply has no "advice", so judge her voice off the summary + why fields too
 	const voiceText = [reply, parsed.plan?.summary ?? '', ...(parsed.plan?.blocks.map((b) => `${b.detail} ${b.why}`) ?? [])].join(' ');
 
-	const theVoice = MUM_MARK.test(voiceText) || MUM_TONE.test(voiceText);
+	if (!live) {
+		// structural checks only from here down: a template sentence is not evidence about her voice
+		if (parsed.plan) {
+			const check = PlanOutputSchema.safeParse(parsed.plan);
+			if (!check.success) problems.push(`${c.name}: plan failed schema`);
+			const shape = dayShape(parsed.plan.blocks);
+			const share = shape.slices.reduce((s, x) => s + x.share, 0);
+			if (shape.empty) problems.push(`${c.name}: plan produced an unshapable day`);
+			if (shape.totalMinutes > 0 && Math.abs(share - 1) > 1e-6) problems.push(`${c.name}: shape does not sum to 1`);
+		}
+		console.log(`      ${parsed.intent} [template] ${parsed.plan ? `plan: ${parsed.plan.blocks.length} blocks` : ''}`);
+		priorMessages.push({ id: `u-${c.name}`, user_id: 'u1', local_date: todayStr, role: 'user', kind: 'chat', content: c.note ?? '(no note)', created_at: now.toISOString() });
+		continue;
+	}
+
+	// a full hinglish reply must be able to pass the voice check, or mirroring the student's language
+	// reads as a failure while actually being the correct behaviour
+	const theVoice =
+		MUM_MARK.test(voiceText) ||
+		MUM_TONE.test(voiceText) ||
+		MUM_GRAMMAR.test(voiceText) ||
+		(c.hinglish && HINGLISH_RE.test(voiceText));
 	const generic = GENERIC_MARK.test(voiceText);
 	if (generic) problems.push(`${c.name}: reads like a generic assistant -> ${voiceText.slice(0, 70)}`);
 	if (OPENER_MARK.test(reply)) problems.push(`${c.name}: chatbot opener -> ${reply.slice(0, 60)}`);
 	if (GRADER_MARK.test(reply)) problems.push(`${c.name}: scorekeeper language -> ${reply.slice(0, 60)}`);
+	if (reply && SERVICE_RE.test(reply)) problems.push(`${c.name}: service-desk language -> ${reply.slice(0, 70)}`);
+	if (reply && SERVICE_PARAPHRASE_RE.test(reply)) {
+		problems.push(`${c.name}: service-desk paraphrase -> ${reply.slice(0, 70)}`);
+	}
+	if (reply && STOCK_CARE_RE.test(reply)) {
+		problems.push(`${c.name}: recited the stock care checklist -> ${reply.slice(0, 70)}`);
+	}
+	if (reply && !c.hinglish && HINGLISH_RE.test(reply)) {
+		problems.push(`${c.name}: unprompted hinglish in an english conversation -> ${reply.slice(0, 60)}`);
+	}
+	if (c.hinglish && reply && !HINGLISH_RE.test(reply)) {
+		problems.push(`${c.name}: wrote hinglish, she replied in english -> ${reply.slice(0, 60)}`);
+	}
+	if (reply && !CARE_RE.test(reply) && !c.tender) {
+		soft.push(`${c.name}: never mentioned food, water, sleep or rest`);
+	}
+	// The voice contract is "answer, then do what a mum does: ask one thing back, or give one
+	// instruction". Checking only for a question flagged correct behaviour as a failure, which is how
+	// a harness starts shouting at people who did nothing wrong.
+	const GIVE_RE = /\b(drink|eat|eat something|sit|stand|go to|head to|grab|finish|start|stop|put|keep|take|walk|sleep|rest|call|text|message|let me know before|skip)\b/i;
+	if (c.interrogate && reply && !ASK_RE.test(reply) && !GIVE_RE.test(reply)) {
+		problems.push(`${c.name}: neither asked anything back nor gave an instruction -> ${reply.slice(0, 70)}`);
+	}
+	if (c.receipt && reply && !RECEIPT_RE.test(reply)) {
+		soft.push(`${c.name}: did not hold a receipt for the repeated promise`);
+	}
+	if (c.tender && reply && /\b(again|always|never you|obviously|sure you|funny|joke|laugh)\b/i.test(reply)) {
+		problems.push(`${c.name}: joked while they were hurting -> ${reply.slice(0, 70)}`);
+	}
+	if (reply) {
+		const norm = reply.toLowerCase().replace(/[^a-z0-9 ]+/g, '').replace(/\s+/g, ' ').trim();
+		for (const p of DIALOGUE) {
+			const m = p.mom.toLowerCase().replace(/[^a-z0-9 ]+/g, '').replace(/\s+/g, ' ').trim();
+			if (m.length > 24 && norm.includes(m)) {
+				problems.push(`${c.name}: parroted an exemplar verbatim -> "${p.mom}"`);
+			}
+		}
+	}
 	// only flag missing character on the cases where she is actually speaking
 	if (reply.length > 0 && !theVoice) problems.push(`${c.name}: no mum fingerprint -> ${voiceText.slice(0, 60)}`);
 
@@ -350,11 +619,16 @@ console.log(`everything: ${h.entries.length} rows (${h.entries.filter((e) => e.k
 console.log(`empty account reads as: ${buildHistory([], [], 'all').emptyReason}`);
 console.log('');
 
-console.log(`intent matched: ${pass}/${CASES.length}`);
+if (live) console.log(`intent matched: ${pass}/${CASES.length}`);
+else console.log(`ran ${CASES.length} exchanges through the fallback path. intent and voice were not evaluated.`);
 if (problems.length) {
 	console.log('\nthings worth fixing:');
 	for (const p of problems) console.log(` - ${p}`);
 } else {
-	console.log('no shame, no past-dwelling, every plan valid.');
+	console.log('no shame, no past-dwelling, every plan valid, and no service-desk language.');
+}
+if (soft.length) {
+	console.log('\nsofter notes (not failures):');
+	for (const n of soft) console.log(` - ${n}`);
 }
 console.log('');

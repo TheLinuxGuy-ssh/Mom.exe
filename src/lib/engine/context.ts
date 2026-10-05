@@ -26,6 +26,8 @@ export interface ContextPayload {
 	as_of_local: string;
 	day_of_week: string;
 	timezone: string;
+	/** The name they asked mom to call them. Deliberate channel, unlike PII found in free text. */
+	nickname: string;
 	prior_plan: {
 		as_of: string;
 		blocks: PriorBlock[];
@@ -120,34 +122,44 @@ export function buildPriorPlan(
 	if (!plan) return null;
 
 	const minutes = nowMinutesInTz(tz, now);
+	// A plan whose local day is already behind us is being read the morning after. Clock time
+	// alone cannot tell that apart from tonight-before-it-started: 22:00 and 08:00 both sit
+	// "before the start and after the end" of a 23:00 -> 07:00 block, and the two want opposite
+	// answers. The plan's own date is what tells them apart.
+	const crossedMidnight = localDateInTz(tz, new Date(plan.as_of)) < localDateInTz(tz, now);
 	const blocks: PriorBlock[] = [];
 
 	for (const b of plan.output.blocks) {
 		const start = hhmmToMin(b.start);
 		const end = hhmmToMin(b.end);
 		const overnight = end <= start;
-		// A block that starts late and ends early (23:30 -> 07:00) began on the previous
-		// day. Comparing against plain "minutes" would skip it all morning, so shift the
-		// window back a day when the clock has already passed the original end time.
-		const startedLastNight = overnight && minutes >= end;
-		const offset = startedLastNight ? -1440 : 0;
-
-		// not started yet: the model must treat it as still upcoming
-		if (minutes < start + offset) continue;
 
 		const mark = marks[`${b.start}-${b.end}`];
-		let status: PriorBlockStatus;
-		if (minutes < end + offset) {
-			status = 'in_progress';
-		} else if (mark === 'yes') {
-			status = 'done';
-		} else if (mark === 'no') {
-			status = 'skipped';
-		} else {
-			status = 'unknown';
+		const marked: PriorBlockStatus | null =
+			mark === 'yes' ? 'done' : mark === 'no' ? 'skipped' : null;
+
+		if (overnight) {
+			// running means past its start tonight, or after midnight and before its end
+			const running = minutes >= start || minutes < end;
+			if (running) {
+				blocks.push({ start: b.start, end: b.end, action: b.action, status: marked ?? 'in_progress' });
+			} else if (crossedMidnight) {
+				// it ran its course overnight
+				blocks.push({ start: b.start, end: b.end, action: b.action, status: marked ?? 'unknown' });
+			}
+			// otherwise it is later tonight and has not started: upcoming, so not prior
+			continue;
 		}
 
-		blocks.push({ start: b.start, end: b.end, action: b.action, status });
+		// not started yet: the model must treat it as still upcoming
+		if (minutes < start) continue;
+
+		blocks.push({
+			start: b.start,
+			end: b.end,
+			action: b.action,
+			status: marked ?? (minutes < end ? 'in_progress' : 'unknown')
+		});
 	}
 
 	if (blocks.length === 0) return null;
@@ -202,6 +214,7 @@ export function buildContext(
 		as_of_local: `${todayStr} ${minToHHMM(nowMinutesInTz(tz, now))}`,
 		day_of_week: weekdayInTz(tz, now),
 		timezone: tz,
+		nickname: profile.display_name || 'beta',
 		prior_plan: priorPlan ?? null,
 		today,
 		conversation: conversation ?? { recent: [], older_digests: [], to_digest: [] },

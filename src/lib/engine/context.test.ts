@@ -3,6 +3,18 @@ import { buildContext, buildTodayInfo, basisFor, buildPriorPlan } from './contex
 import type { Checkin, Followup, Plan, Profile } from '../storage/types';
 import { scrubText, ageBand } from './scrub';
 
+/** a Date at a wall-clock time in a timezone, without depending on the machine's own zone */
+function at(tz: string, iso: string): Date {
+	const [d, t] = iso.split('T');
+	const [h, m] = t!.split(':').map(Number);
+	const guess = new Date(`${d}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00Z`);
+	const offsetMin = new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'longOffset' })
+		.format(guess)
+		.match(/GMT([+-])(\d{1,2}):(\d{2})/);
+	const shift = offsetMin ? (offsetMin[1] === '-' ? -1 : 1) * (Number(offsetMin[2]) * 60 + Number(offsetMin[3])) : 0;
+	return new Date(guess.getTime() - shift * 60_000);
+}
+
 const profile: Profile = {
 	id: 'u1',
 	display_name: 'Rahul Sharma',
@@ -41,19 +53,51 @@ function checkin(date: string, over: Partial<Checkin> = {}): Checkin {
 }
 
 describe('buildContext', () => {
-	it('never includes name, email or exact birth year in the payload', () => {
+	it('passes the chosen nickname, and never an email or an exact birth year', () => {
+		const named: Profile = { ...profile, display_name: 'Bunty' };
 		const { payload } = buildContext(
-			profile,
-			[checkin('2026-10-02'), checkin('2026-10-03', { notes: 'my name is Rahul and rahul@gmail.com slept badly' })],
+			named,
+			[checkin('2026-10-03', { notes: 'my email is rahul@gmail.com and I slept badly' })],
 			[] as Followup[],
-			buildTodayInfo(profile, null, 'Asia/Kolkata'),
+			buildTodayInfo(named, null, 'Asia/Kolkata'),
 			new Date('2026-10-03T15:00:00+05:30')
 		);
 		const raw = JSON.stringify(payload);
-		expect(raw).not.toContain('Rahul');
+		// the nickname is a deliberate channel: they chose it for her at onboarding
+		expect(payload.nickname).toBe('Bunty');
+		expect(raw).toContain('Bunty');
+		// but an email or birth year found in free text is still scrubbed
 		expect(raw).not.toContain('rahul@gmail.com');
 		expect(raw).not.toContain('2004');
 		expect(payload.profile_anon.age_band).toBe('18-21');
+	});
+
+	it('still scrubs a real name typed into a note, even when a nickname is set', () => {
+		const named: Profile = { ...profile, display_name: 'Bunty' };
+		const { payload } = buildContext(
+			named,
+			[checkin('2026-10-03', { notes: "my name is Rahul and rahul@gmail.com, call me Priya" })],
+			[] as Followup[],
+			buildTodayInfo(named, null, 'Asia/Kolkata'),
+			new Date('2026-10-03T15:00:00+05:30')
+		);
+		const raw = JSON.stringify(payload);
+		expect(payload.nickname).toBe('Bunty');
+		expect(raw).not.toContain('Rahul');
+		expect(raw).not.toContain('Priya');
+		expect(raw).not.toContain('rahul@gmail.com');
+	});
+
+	it('falls back to beta when no nickname was chosen', () => {
+		const blank: Profile = { ...profile, display_name: '' };
+		const { payload } = buildContext(
+			blank,
+			[],
+			[] as Followup[],
+			buildTodayInfo(blank, null, 'Asia/Kolkata'),
+			new Date('2026-10-03T15:00:00+05:30')
+		);
+		expect(payload.nickname).toBe('beta');
 	});
 
 	it('scrubs free-text notes going into the payload', () => {
@@ -196,5 +240,68 @@ describe('scrub integration', () => {
 		expect(scrubbed).not.toContain('Sneha');
 		expect(scrubbed).toContain('slept at 3am');
 		expect(ageBand(2005, 2026)).toBe('18-21');
+	});
+});
+
+describe('prior plan across midnight', () => {
+	/**
+	 * The reply that started this: the plan said study till 00:00 and sleep from 00:30, and she
+	 * answered as if the day ended at 23:30. The plan's own statuses were wrong before the answer:
+	 * a study block that runs past midnight was reported as `unknown` while the student sat inside
+	 * it, and an overnight sleep block was reported before it had even started.
+	 */
+	const TZ = 'Asia/Kolkata';
+
+	function planOn(day: string, blocks: { start: string; end: string; action: string }[]): Plan {
+		return {
+			id: 'p1',
+			user_id: 'u1',
+			local_date: day,
+			as_of: `${day}T20:49:00.000Z`,
+			context_snapshot: {},
+			output: {
+				summary: 'late study, then bed.',
+				blocks: blocks.map((b) => ({ ...b, detail: 'd', why: '' })),
+				flags: []
+			},
+			basis: 'partial',
+			model_id: 'test',
+			fallback_reason: null,
+			supersedes_plan_id: null,
+			created_at: `${day}T20:49:00.000Z`
+		} as unknown as Plan;
+	}
+
+	it('calls a block that runs past midnight in progress while the student is inside it', () => {
+		const plan = planOn('2026-10-04', [{ start: '20:49', end: '00:00', action: 'study_block' }]);
+		const prior = buildPriorPlan(plan, {}, at(TZ, '2026-10-04T22:00:00'), TZ);
+		expect(prior?.blocks[0]?.status).toBe('in_progress');
+	});
+
+	it('leaves an overnight block out before it has started', () => {
+		const plan = planOn('2026-10-04', [{ start: '23:00', end: '07:00', action: 'sleep' }]);
+		expect(buildPriorPlan(plan, {}, at(TZ, '2026-10-04T22:00:00'), TZ)).toBeNull();
+	});
+
+	it('calls an overnight block in progress either side of midnight', () => {
+		const plan = planOn('2026-10-04', [{ start: '23:00', end: '07:00', action: 'sleep' }]);
+		expect(buildPriorPlan(plan, {}, at(TZ, '2026-10-04T23:30:00'), TZ)?.blocks[0]?.status).toBe(
+			'in_progress'
+		);
+		expect(buildPriorPlan(plan, {}, at(TZ, '2026-10-05T00:30:00'), TZ)?.blocks[0]?.status).toBe(
+			'in_progress'
+		);
+	});
+
+	it('still reports blocks that ended earlier today', () => {
+		const plan = planOn('2026-10-04', [{ start: '09:00', end: '10:30', action: 'class' }]);
+		const prior = buildPriorPlan(plan, { '09:00-10:30': 'yes' }, at(TZ, '2026-10-04T22:00:00'), TZ);
+		expect(prior?.blocks[0]?.status).toBe('done');
+	});
+
+	it('lets a mark override in_progress, because a mark is newer information than the clock', () => {
+		const plan = planOn('2026-10-04', [{ start: '20:49', end: '00:00', action: 'study_block' }]);
+		const prior = buildPriorPlan(plan, { '20:49-00:00': 'no' }, at(TZ, '2026-10-04T22:00:00'), TZ);
+		expect(prior?.blocks[0]?.status).toBe('skipped');
 	});
 });

@@ -1,0 +1,58 @@
+name: CI
+
+# The badge in the README is only worth having if something actually runs behind it. Two gates:
+# the type checker (which catches every contract the Zod schemas and the Storage interface imply)
+# and the unit suite (which runs without a DOM, so it needs no services and no secrets).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: install
+        run: npm ci
+
+      - name: check
+        run: npm run check
+
+      - name: test
+        run: npm test
+
+  build:
+    name: production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: install
+        run: npm ci
+
+      # No secrets, no .env. The build must succeed with Supabase unconfigured: that is the
+      # default local-mode path, and a build that needs a hosted project to compile would be lying
+      # about how easy this is to run.
+      - name: build
+        run: npm run build

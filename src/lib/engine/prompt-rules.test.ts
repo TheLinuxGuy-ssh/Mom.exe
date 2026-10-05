@@ -7,7 +7,8 @@ import {
 	noteLength,
 	noteReady,
 	noteShortfall,
-	readyLabel
+	readyLabel,
+	hasSomethingToSend
 } from './prompt-rules';
 
 describe('note minimum', () => {
@@ -93,5 +94,38 @@ describe('idle labels', () => {
 		for (let h = 0; h < 24; h++) {
 			expect(readyLabel(h).trim().length).toBeGreaterThan(0);
 		}
+	});
+});
+
+describe('refusing an empty submission', () => {
+	/**
+	 * The composer had no guard, so pressing the button with an empty box went through the whole
+	 * pipeline: a model call, a plan, and a reply to a question nobody asked. The button's idle label
+	 * invited it.
+	 */
+	it('has nothing to send when the box is empty', () => {
+		expect(hasSomethingToSend('', null)).toBe(false);
+		expect(hasSomethingToSend('   ', null)).toBe(false);
+		expect(hasSomethingToSend('\n\t ', null)).toBe(false);
+	});
+
+	it('refuses the punctuation of someone who hit enter without typing', () => {
+		expect(hasSomethingToSend('.', null)).toBe(false);
+		expect(hasSomethingToSend('...', null)).toBe(false);
+		expect(hasSomethingToSend('?!', null)).toBe(false);
+		expect(hasSomethingToSend('…', null)).toBe(false);
+	});
+
+	it('accepts a quick band on its own, because that is a real answer', () => {
+		expect(hasSomethingToSend('', 'rough')).toBe(true);
+		expect(hasSomethingToSend('   ', 'great')).toBe(true);
+		expect(hasSomethingToSend('', '  ')).toBe(false);
+	});
+
+	it('accepts anything with a word in it', () => {
+		expect(hasSomethingToSend('ok', null)).toBe(true);
+		expect(hasSomethingToSend('idk', null)).toBe(true);
+		expect(hasSomethingToSend('Hi.', null)).toBe(true);
+		expect(hasSomethingToSend('slept at 2', null)).toBe(true);
 	});
 });

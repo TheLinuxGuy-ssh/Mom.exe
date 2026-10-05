@@ -14,6 +14,23 @@
 	const deadline = $derived(
 		checkin.notes ? /\b(due|exam|submission|assignment|quiz|test|project)\b/i.test(checkin.notes) : false
 	);
+
+	/**
+	 * Whether she understood anything at all. A bare "mom read:" with nothing after it looks like the
+	 * app failed to load rather than like a student who has not written anything yet, so the empty
+	 * case says so in the same hand as everything else.
+	 */
+	const heard = $derived(
+		Boolean(
+			checkin.quick ||
+				checkin.sleep_hours != null ||
+				checkin.slept_at ||
+				checkin.woke_at ||
+				checkin.mood != null ||
+				deadline ||
+				slots.some((s) => checkin.meals?.[s.k] != null)
+		)
+	);
 </script>
 
 <div class="flex flex-wrap items-center gap-1.5">
@@ -43,4 +60,7 @@
 	{/each}
 	{#if deadline}<span class="chip !py-0.5 !px-2.5 text-[11px] !bg-blue/50 !shadow-[2px_2px_0_var(--color-ink)]">deadline today</span>{/if}
 	{#if checkin.mood != null}<span class="chip !py-0.5 !px-2.5 text-[11px] !shadow-[2px_2px_0_var(--color-ink)]">mood {checkin.mood}/5</span>{/if}
+	{#if !heard}
+		<span class="text-[11px] font-semibold text-mute italic">nothing yet. write her a note.</span>
+	{/if}
 </div>

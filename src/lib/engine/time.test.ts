@@ -6,6 +6,10 @@ import {
 	daysBetween,
 	localDateInTz,
 	nowMinutesInTz,
+	nowLocalWallClock,
+	weekdayInTz,
+	tzOffsetLabel,
+	isValidTimezone,
 	fmtCountdown
 } from './time';
 
@@ -42,5 +46,28 @@ describe('time', () => {
 		expect(fmtCountdown(45)).toBe('45 min left');
 		expect(fmtCountdown(90)).toBe('1 hr 30 min left');
 		expect(fmtCountdown(0)).toBe('now');
+	});
+});
+
+describe('timezones', () => {
+	it('accepts zones the runtime knows and rejects typos', () => {
+		// a typo used to throw a RangeError deep inside a dashboard refresh, taking the whole page
+		// down instead of showing one wrong date
+		expect(isValidTimezone('Asia/Kolkata')).toBe(true);
+		expect(isValidTimezone('UTC')).toBe(true);
+		expect(isValidTimezone('Asia/Kolkat')).toBe(false);
+		expect(isValidTimezone('not a zone')).toBe(false);
+		expect(isValidTimezone('')).toBe(false);
+	});
+
+	it('still formats dates when the stored zone is unusable', () => {
+		// a profile written before settings validated the field should degrade to UTC, not to a
+		// blank page
+		expect(localDateInTz('nonsense/zone', new Date('2026-10-05T12:00:00Z'))).toBe('2026-10-05');
+		expect(nowLocalWallClock('nonsense/zone', new Date('2026-10-05T12:00:00Z'))).toBe(
+			'2026-10-05 12:00'
+		);
+		expect(weekdayInTz('nonsense/zone', new Date('2026-10-05T12:00:00Z'))).toBe('monday');
+		expect(tzOffsetLabel('nonsense/zone')).toBeTruthy();
 	});
 });

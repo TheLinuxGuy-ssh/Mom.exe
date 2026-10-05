@@ -47,3 +47,26 @@ export function idleLabel(hour: number): string {
 export function readyLabel(hour: number): string {
 	return hour < 5 ? 'tell me' : 'Ask Mom';
 }
+
+/**
+ * Whether there is anything here to send.
+ *
+ * The composer is the only place a student starts a conversation, and until this existed an empty
+ * box was a valid submission: pressing the button with nothing typed went straight through to the
+ * model, burned a full planning round trip, and answered a question nobody asked. The button's own
+ * idle label invited it, which is worse.
+ *
+ * A quick band counts on its own, because choosing "rough" over three words is a real answer about
+ * the day. Whitespace, and punctuation typed by someone who hit enter without thinking, do not.
+ */
+export function hasSomethingToSend(text: string, quick: string | null): boolean {
+	if (quick !== null && quick.trim() !== '') return true;
+	const t = text.trim();
+	if (t === '') return false;
+	return !/^[\s.!?…]+$/.test(t);
+}
+
+/** Why the press did nothing, in her voice rather than the browser's. */
+export function emptyNoteMessage(): string {
+	return 'nothing to read, love. write something first, or pick rough/okay/great.';
+}

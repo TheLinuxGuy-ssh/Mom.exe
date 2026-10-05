@@ -8,14 +8,14 @@ export interface LLMConfig {
 	timeoutMs: number;
 }
 
-const LS_KEY = 'momexe:llm-config';
-
 export function defaultLLMConfig(): LLMConfig {
-	const supabaseUrl = import.meta.env.VITE_SUPABASE_URL ?? '';
+	// `import.meta.env` is defined by Vite and undefined under plain node, so the dev scripts in
+	// `scripts/` could not call this without a TypeError before they got as far as testing anything
+	const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL ?? '';
 	return {
 		mode: 'proxy',
 		url: supabaseUrl ? `${supabaseUrl}/functions/v1/plan` : '',
-		model: import.meta.env.VITE_NIM_MODEL ?? 'openai/gpt-oss-20b',
+		model: import.meta.env?.VITE_NIM_MODEL ?? 'openai/gpt-oss-20b',
 		apiKey: '',
 		reasoningEffort: 'low',
 		maxTokens: 1200,
@@ -23,18 +23,13 @@ export function defaultLLMConfig(): LLMConfig {
 	};
 }
 
+/**
+ * The endpoint is the hosted proxy, always.
+ *
+ * The model and the key stay on the server: the browser only ever posts a note and receives a plan,
+ * so there is nothing here worth storing and nothing that should be able to point the app at a
+ * different backend. Settings no longer offers a direct connection either.
+ */
 export function getLLMConfig(): LLMConfig {
-	try {
-		const raw = localStorage.getItem(LS_KEY);
-		// `mode` is pinned to 'proxy'. Settings no longer offers a local/direct choice, so a
-		// stale stored 'direct' must not keep silently bypassing the hosted proxy.
-		if (raw) return { ...defaultLLMConfig(), ...(JSON.parse(raw) as Partial<LLMConfig>), mode: 'proxy' };
-	} catch {
-		/* fall through to defaults */
-	}
 	return defaultLLMConfig();
-}
-
-export function setLLMConfig(cfg: LLMConfig): void {
-	localStorage.setItem(LS_KEY, JSON.stringify(cfg));
 }

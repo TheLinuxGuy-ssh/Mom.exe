@@ -6,6 +6,7 @@
 	import Trash2 from 'lucide-svelte/icons/trash-2';
 	import type { Profile } from '$lib/storage/types';
 	import { getStorage } from '$lib/storage';
+	import { isValidTimezone } from '$lib/engine/time';
 	import { getSession } from '$lib/auth/session';
 	import { toast } from '$lib/stores/toast';
 	import { seedPersona, PERSONAS } from '../../../dev-fixtures/personas';
@@ -16,9 +17,11 @@
 	// destructive actions need an explicit go-ahead, and must not be re-enterable while running
 	let seeding = $state<string | null>(null);
 	let wiping = $state(false);
+	let saving = $state(false);
+	let exporting = $state(false);
 	let askSeed = $state<string | null>(null);
 	let askWipe = $state(false);
-	let busy = $derived(seeding !== null || wiping);
+	let busy = $derived(seeding !== null || wiping || saving);
 	const busyReason = $derived(seeding !== null ? 'demo data' : wiping ? 'wipe' : null);
 
 	onMount(async () => {
@@ -27,21 +30,39 @@
 			goto('/login');
 			return;
 		}
-		profile = await getStorage().getProfile(session.userId);
+		profile = await getStorage()
+			.getProfile(session.userId)
+			.catch(() => null);
+		if (!profile) toast('could not load your profile. check your connection.', 'warn');
 	});
 
 	async function saveProfile(): Promise<void> {
 		const session = getSession();
-		if (!session || !profile) return;
-		const { id: _id, created_at: _c, ...input } = profile;
-		await getStorage().saveProfile(session.userId, input);
-		toast('profile saved');
+		if (!session || !profile || saving) return;
+		// every date in the app is formatted through this string, so a typo here would throw inside
+		// the next dashboard refresh and take the whole page down. refuse it here, where it is fixable
+		if (!isValidTimezone(profile.timezone)) {
+			toast(`"${profile.timezone}" is not a timezone. try Asia/Kolkata.`, 'warn');
+			return;
+		}
+		saving = true;
+		try {
+			const { id: _id, created_at: _c, ...input } = profile;
+			await getStorage().saveProfile(session.userId, input);
+			toast('profile saved');
+		} catch (err) {
+			console.error(err);
+			toast('could not save. try again.', 'warn');
+		} finally {
+			saving = false;
+		}
 	}
 
-	function exportData(): void {
+	async function exportData(): Promise<void> {
 		const session = getSession();
-		if (!session) return;
-		void (async () => {
+		if (!session || exporting) return;
+		exporting = true;
+		try {
 			const storage = getStorage();
 			const data = {
 				profile: await storage.getProfile(session.userId),
@@ -54,7 +75,15 @@
 			a.download = 'mom-exe-export.json';
 			a.click();
 			URL.revokeObjectURL(a.href);
-		})();
+			toast('exported');
+		} catch (err) {
+			// previously this ran fire and forget, so a rejected read was an unhandled rejection and
+			// the button silently did nothing at all
+			console.error(err);
+			toast('export failed. try again.', 'warn');
+		} finally {
+			exporting = false;
+		}
 	}
 
 	async function deleteAll(): Promise<void> {
@@ -78,7 +107,7 @@
 		seeding = key;
 		try {
 			await seedPersona(getStorage(), session.userId, key);
-			toast('demo data loaded, go ask for a plan');
+			toast('synthetic history loaded. write her a note to see what she plans.');
 			askSeed = null;
 			await goto('/dashboard');
 		} catch (err) {
@@ -128,7 +157,9 @@
 					</select>
 				</label>
 			</div>
-			<button type="button" class="btn !bg-lime !rounded-xl px-5 py-2 text-sm" onclick={() => void saveProfile()}>save profile</button>
+			<button type="button" class="btn !bg-lime !rounded-xl px-5 py-2 text-sm" onclick={() => void saveProfile()} disabled={saving}>
+				{saving ? 'saving...' : 'save profile'}
+			</button>
 			<button type="button" class="btn !rounded-xl px-5 py-2 text-sm ml-2" onclick={() => void gotoOnboarding()}>full setup again</button>
 		</section>
 	{:else}
@@ -154,13 +185,17 @@
 				</button>
 			{/each}
 		</div>
-		<p class="text-[11px] font-semibold text-mute">overwrites this account's check-ins with synthetic histories for testing plan quality.</p>
+		<p class="text-[11px] font-semibold text-mute">
+			These are made-up students, not anyone you know: loading one replaces this account's
+			check-ins with a synthetic history, so you can judge the plans she writes without typing
+			out a week of your own. Everything after that — your notes, her replies — is yours.
+		</p>
 	</section>
 
 	<section class="card p-5 space-y-3">
 		<h2 class="font-black uppercase text-sm tracking-widest text-brown">your data</h2>
 		<div class="flex flex-wrap gap-2">
-			<button type="button" class="btn !rounded-xl px-4 py-2 text-xs flex items-center gap-1.5" onclick={exportData}>
+			<button type="button" class="btn !rounded-xl px-4 py-2 text-xs flex items-center gap-1.5" onclick={exportData} disabled={exporting}>
 				<Download class="w-3.5 h-3.5" /> export json
 			</button>
 			<button

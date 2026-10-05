@@ -51,7 +51,12 @@ export function computeStats(
 			: { value: null, n: 0 };
 
 	const debt = sleeps7.reduce((s, x) => s + Math.max(0, 7.5 - (x.c.sleep_hours ?? 0)), 0);
-	const sleepDebt = { value: Math.round(debt * 10) / 10, n: sleeps7.length };
+	// no nights means unknown, not zero: every prompt in this app insists missing data is unknown,
+	// and a debt of 0.0 reads to the model as "you are fully rested"
+	const sleepDebt = {
+		value: sleeps7.length > 0 ? Math.round(debt * 10) / 10 : null,
+		n: sleeps7.length
+	};
 
 	const bedtimes = known7
 		.filter((x) => x.c.slept_at)
@@ -63,9 +68,19 @@ export function computeStats(
 	if (bedtimes.length >= 4) {
 		const recent = bedtimes.slice(0, Math.min(3, Math.ceil(bedtimes.length / 2)));
 		const older = bedtimes.slice(recent.length);
-		const avg = (a: number[]) => a.reduce((s, v) => s + v, 0) / a.length;
-		const raw = (avg(recent) - avg(older)) / 60;
-		drift = { value: Math.round(raw * 10) / 10, n: bedtimes.length };
+		// Bedtimes live on a circle: 00:30 is 30 minutes later than 23:50, not 23h20m earlier.
+		// Averaging them as plain numbers made a student whose bedtime crept from 23:50 to 00:20
+		// look 23 hours earlier, which the model then reads as a catastrophic schedule collapse.
+		const circularMean = (xs: number[]): number => {
+			const sx = xs.reduce((s, x) => s + Math.cos((2 * Math.PI * x) / 1440), 0);
+			const sy = xs.reduce((s, x) => s + Math.sin((2 * Math.PI * x) / 1440), 0);
+			if (sx === 0 && sy === 0) return xs[0] ?? 0;
+			return (((Math.atan2(sy, sx) / (2 * Math.PI)) * 1440 + 1440) % 1440);
+		};
+		let raw = circularMean(recent) - circularMean(older);
+		if (raw > 720) raw -= 1440;
+		if (raw < -720) raw += 1440;
+		drift = { value: Math.round((raw / 60) * 10) / 10, n: bedtimes.length };
 	}
 
 	const under5 = withDays.filter((x) => x.c.sleep_hours != null && x.c.sleep_hours < 5);

@@ -35,7 +35,10 @@ export function computeSleepHours(sleptAt: string, wokeAt: string): number | nul
 	const [sh, sm] = sleptAt.split(':').map(Number);
 	const [wh, wm] = wokeAt.split(':').map(Number);
 	let diff = wh * 60 + wm - (sh * 60 + sm);
-	if (diff <= 0) diff += 1440;
+	// identical times are unknown, not a full day: nobody sleeps exactly 24 hours and reporting
+	// it as 24 would be the single worst number in the whole payload
+	if (diff === 0) return null;
+	if (diff < 0) diff += 1440;
 	if (diff > 1440) return null;
 	return Math.round((diff / 60) * 10) / 10;
 }
@@ -91,7 +94,13 @@ export function heuristicExtract(text: string): NotePatch {
 		patch.slept_at = to24(Number(slept[1]), slept[2] ? Number(slept[2]) : null, slept[3] ?? null);
 	}
 
-	const woke = t.match(/(?:woke|got up|woken|up) (?:up )?at (\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+	// "stayed up at 3" is about sleeping late, not waking. A bare "up at" matched it and invented
+	// a wake time, which then became a 24 hour night's sleep further down. So "up at" only counts
+	// when it carries a meridiem, and the waking verbs win either way.
+	const woke =
+		t.match(/\b(?:woke|got|woken|awake)\s+up\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i) ??
+		t.match(/\b(?:woke|got|woken|awake)\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i) ??
+		t.match(/\bup\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i);
 	if (woke) {
 		patch.woke_at = to24(Number(woke[1]), woke[2] ? Number(woke[2]) : null, woke[3] ?? null);
 	}
@@ -101,7 +110,7 @@ export function heuristicExtract(text: string): NotePatch {
 		t.match(/slept (?:for )?(\d{1,2}(?:\.\d)?)\s*(?:h|hrs?|hours?)?/);
 	if (hrs) patch.sleep_hours = Number(hrs[1]);
 
-	if (!patch.sleep_hours && patch.slept_at && patch.woke_at) {
+	if (patch.sleep_hours == null && patch.slept_at && patch.woke_at) {
 		patch.sleep_hours = computeSleepHours(patch.slept_at, patch.woke_at);
 	}
 
@@ -164,7 +173,7 @@ export function mergeUnderstanding(heur: NotePatch, ai: Extraction | null, expli
 		deadline_notes: pick(ai?.deadline_notes ?? null, heur.deadline_notes),
 		disturbances: [...new Set([...(ai?.disturbances ?? []), ...heur.disturbances])].slice(0, 4)
 	};
-	if (!merged.sleep_hours && merged.slept_at && merged.woke_at) {
+	if (merged.sleep_hours == null && merged.slept_at && merged.woke_at) {
 		merged.sleep_hours = computeSleepHours(merged.slept_at, merged.woke_at);
 	}
 	return merged;
@@ -183,14 +192,29 @@ export function hasAnySignal(patch: NotePatch): boolean {
 	);
 }
 
-export function mergeCheckinRow(base: Checkin | null, patch: NotePatch, note: string, localDate: string): CheckinInput {
+/**
+ * Fold a note into the day's row.
+ *
+ * `removedKeys` are the chips the student threw away, and they beat the stored row. Every other
+ * field merges with the note winning over what is already saved, which is right for "I slept at 2"
+ * but useless for removal: a null patch field used to mean "not mentioned", so `patch ?? base`
+ * put the very value they had just deleted straight back. Tapping the x on "~5h sleep" did
+ * nothing at all, and nothing on screen said so.
+ */
+export function mergeCheckinRow(
+	base: Checkin | null,
+	patch: NotePatch,
+	note: string,
+	localDate: string,
+	removedKeys: string[] = []
+): CheckinInput {
 	const baseMeals = base?.meals ?? { b: null, l: null, s: null, d: null };
 	const patchMeals = patch.meals ?? { b: null, l: null, s: null, d: null };
 	const notes = [base?.notes, note]
 		.filter((n): n is string => Boolean(n))
 		.join(' | ')
 		.slice(0, 500);
-	return {
+	const row: CheckinInput = {
 		local_date: localDate,
 		quick: patch.quick ?? base?.quick ?? null,
 		sleep_hours: patch.sleep_hours ?? base?.sleep_hours ?? null,
@@ -206,4 +230,15 @@ export function mergeCheckinRow(base: Checkin | null, patch: NotePatch, note: st
 		notes: notes || null,
 		source: 'note'
 	};
+	for (const key of removedKeys) {
+		if (key.startsWith('meals.')) {
+			const slot = key.split('.')[1] as 'b' | 'l' | 's' | 'd';
+			if (row.meals) row.meals[slot] = null;
+		} else if (key === 'quick') {
+			row.quick = null;
+		} else {
+			(row as unknown as Record<string, unknown>)[key] = null;
+		}
+	}
+	return row;
 }

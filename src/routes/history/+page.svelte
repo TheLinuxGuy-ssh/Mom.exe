@@ -4,11 +4,13 @@
 	import ChevronDown from 'lucide-svelte/icons/chevron-down';
 	import ArrowLeft from 'lucide-svelte/icons/arrow-left';
 	import MessagesSquare from 'lucide-svelte/icons/messages-square';
+	import CalendarDays from 'lucide-svelte/icons/calendar-days';
 	import type { Message, Plan } from '$lib/storage/types';
 	import { getStorage } from '$lib/storage';
 	import { getSession } from '$lib/auth/session';
 	import { ACTION_LABEL, type Action } from '$lib/engine/actions';
-	import { buildHistory, chatPreview, type HistoryTab } from '$lib/engine/history';
+	import { buildHistory, chatPreview, type ChatEntry, type HistoryEntry, type HistoryTab } from '$lib/engine/history';
+	import { splitBubbles } from '$lib/engine/bubbles';
 	import ActionIcon from '$lib/components/ActionIcon.svelte';
 
 	let plans = $state<Plan[]>([]);
@@ -23,6 +25,27 @@
 		{ value: 'chats', label: 'chats' }
 	];
 
+	/**
+	 * One key per conversation, used both to identify the row and to remember whether it is
+	 * expanded. A day is no longer enough: two chats on the same afternoon are two entries, and
+	 * keying both on the date throws a duplicate-key error. Sessions are unique by construction,
+	 * and a conversation from before sessions existed falls back to its first message, which is
+	 * unique too.
+	 */
+	function entryKey(e: HistoryEntry): string {
+		return e.kind === 'plan' ? `plan-${e.plan.id}` : `chat-${e.sessionId ?? `${e.date}-${e.messages[0]?.id ?? 'x'}`}`;
+	}
+
+	/**
+	 * Two chats on the same afternoon are two conversations, so the clock time is what tells them
+	 * apart. Rendered in the browser's own timezone, which is the one they experienced it in.
+	 */
+	function sessionTime(e: ChatEntry): string {
+		const t = new Date(e.at);
+		if (Number.isNaN(t.getTime())) return '';
+		return `at ${t.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+	}
+
 	const view = $derived(buildHistory(plans, messages, tab));
 
 	onMount(async () => {
@@ -31,10 +54,14 @@
 			goto('/login');
 			return;
 		}
-		const storage = getStorage();
-		plans = await storage.listPlans(session.userId, 50);
-		messages = await storage.listMessages(session.userId, 300);
-		loading = false;
+		try {
+			const storage = getStorage();
+			// a failed read here used to leave the page permanently blank with no way to retry
+			plans = await storage.listPlans(session.userId, 50).catch(() => []);
+			messages = await storage.listMessages(session.userId, 300).catch(() => []);
+		} finally {
+			loading = false;
+		}
 	});
 </script>
 
@@ -86,10 +113,10 @@
 		</div>
 	{:else}
 		<div class="space-y-3">
-			{#each view.entries as e (e.kind === 'plan' ? `plan-${e.plan.id}` : `chat-${e.date}`)}
+			{#each view.entries as e (entryKey(e))}
 				{#if e.kind === 'plan'}
 					{@const p = e.plan}
-					{@const ref = `plan-${p.id}`}
+					{@const ref = entryKey(e)}
 					<button
 						type="button"
 						class="card !rounded-2xl p-4 w-full text-left cursor-pointer"
@@ -97,8 +124,9 @@
 					>
 						<div class="flex items-center justify-between gap-3">
 							<div class="min-w-0">
-								<p class="font-black text-sm">
-									pinned
+								<p class="font-black text-sm flex items-center gap-1.5">
+									<CalendarDays class="w-3.5 h-3.5 text-brown" />
+									plan
 									<span class="text-mute font-bold text-xs ml-2">{p.basis} data, {p.model_id}</span>
 								</p>
 								<p class="text-sm font-semibold text-mute truncate mt-0.5">{p.output.summary}</p>
@@ -125,7 +153,7 @@
 						{/if}
 					</button>
 				{:else}
-					{@const ref = `chat-${e.date}`}
+					{@const ref = entryKey(e)}
 					<button
 						type="button"
 						class="card !rounded-2xl p-4 w-full text-left cursor-pointer"
@@ -134,9 +162,17 @@
 						<div class="flex items-center justify-between gap-3">
 							<div class="min-w-0">
 								<p class="font-black text-sm flex items-center gap-1.5">
-									<MessagesSquare class="w-3.5 h-3.5 text-brown" />
-									you two
-									<span class="text-mute font-bold text-xs ml-2">{e.messages.length} messages</span>
+									{#if e.isPlan}
+										<CalendarDays class="w-3.5 h-3.5 text-brown" />
+										replan
+									{:else}
+										<MessagesSquare class="w-3.5 h-3.5 text-brown" />
+										conversation
+									{/if}
+									<span class="text-mute font-bold text-xs ml-2">
+										{e.sessionId ? sessionTime(e) : ''}
+										{e.messages.length} messages
+									</span>
 								</p>
 								<p class="text-sm font-semibold text-mute truncate mt-0.5">{chatPreview(e.messages)}</p>
 							</div>
@@ -146,15 +182,24 @@
 						{#if open === ref}
 							<div class="mt-4 space-y-2 border-t-2 border-ink/10 pt-3">
 								{#each e.messages as m (m.id)}
-									<div class="flex {m.role === 'mom' ? 'justify-start' : 'justify-end'}">
-										<div
-											class="max-w-[85%] px-3 py-1.5 text-sm leading-snug {m.role === 'mom'
-												? 'sticky-note !text-[15px]'
-												: 'border-2 border-ink bg-blue/40 font-semibold rounded-xl rounded-br-sm'}"
-										>
-											{m.content}
+									{#if m.role === 'user'}
+										<div class="flex justify-end">
+											<div
+												class="max-w-[85%] px-3 py-1.5 text-sm leading-snug border-2 border-ink bg-blue/40 font-semibold rounded-xl rounded-br-sm"
+											>
+												{m.content}
+											</div>
 										</div>
-									</div>
+									{:else}
+										<!-- split exactly as the conversation does, so a thread reads the same in both places -->
+										{#each splitBubbles(m.content) as part, i (i)}
+											<div class="flex justify-start">
+												<div class="max-w-[85%] px-3 py-1.5 text-sm leading-snug sticky-note !text-[15px]">
+													{part}
+												</div>
+											</div>
+										{/each}
+									{/if}
 								{/each}
 							</div>
 						{/if}

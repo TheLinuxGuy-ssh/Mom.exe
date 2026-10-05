@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { onMount } from 'svelte';
+	import { onDestroy, onMount } from 'svelte';
 	import Mail from 'lucide-svelte/icons/mail';
 	import KeyRound from 'lucide-svelte/icons/key-round';
 	import ArrowRight from 'lucide-svelte/icons/arrow-right';
@@ -17,6 +17,14 @@
 	let busy = $state(false);
 	let resendIn = $state(0);
 	let finished = false;
+	let resendTimer: ReturnType<typeof setInterval> | null = null;
+
+	function clearResendTimer(): void {
+		if (resendTimer) clearInterval(resendTimer);
+		resendTimer = null;
+	}
+
+	onDestroy(clearResendTimer);
 
 	onMount(() => {
 		if (getSession()) {
@@ -26,14 +34,25 @@
 		if (!isHosted()) return;
 
 		const cleanup = onAuthEvent((_event, session) => {
-			if (session) finishLogin(session.user.id, session.user.email ?? email);
+			if (!session) return;
+			// capture the user now, finish the login outside the callback. finishLogin reads the
+			// profile, which reads the auth token, and calling back into the auth client from
+			// inside onAuthStateChange can deadlock: the student then sits on this screen forever
+			// with no error and no way forward.
+			const { id, email: userEmail } = session.user;
+			queueMicrotask(() => void finishLogin(id, userEmail ?? email));
 		});
 
-		void consumeUrlToken().then(async (ok) => {
-			if (!ok) return;
-			const user = await getSessionUser();
-			if (user) finishLogin(user.id, user.email ?? email);
-		});
+		void consumeUrlToken()
+			.then(async (ok) => {
+				if (!ok) return;
+				const user = await getSessionUser();
+				if (user) await finishLogin(user.id, user.email ?? email);
+			})
+			.catch(() => {
+				// an expired or already-used link lands here. the student can still type a code
+				toast('that link did not work. request a new one.', 'warn');
+			});
 
 		return cleanup;
 	});
@@ -62,9 +81,12 @@
 				await sendOtp(trimmed);
 				stage = 'code';
 				resendIn = 60;
-				const timer = setInterval(() => {
+				// tracked so it can be cleared on unmount. left running it kept ticking a counter
+				// for a page nobody was looking at, and stacked a second one on every resend
+				clearResendTimer();
+				resendTimer = setInterval(() => {
 					resendIn--;
-					if (resendIn <= 0) clearInterval(timer);
+					if (resendIn <= 0) clearResendTimer();
 				}, 1000);
 				toast('sent. check your inbox (and spam, honestly)');
 			} else {

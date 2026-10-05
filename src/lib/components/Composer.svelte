@@ -6,7 +6,15 @@
 	import { heuristicExtract, DISTURBANCE_LABEL } from '$lib/engine/extract';
 	import type { QuickBand } from '$lib/storage/types';
 	import GooeyToggle from './GooeyToggle.svelte';
-	import { idleLabel, noteReady, noteShortfall, readyLabel } from '$lib/engine/prompt-rules';
+	import {
+		emptyNoteMessage,
+		hasSomethingToSend,
+		idleLabel,
+		noteReady,
+		noteShortfall,
+		readyLabel
+	} from '$lib/engine/prompt-rules';
+	import { toast } from '$lib/stores/toast';
 
 	let {
 		busy = false,
@@ -16,6 +24,7 @@
 		onsubmit: (payload: { text: string; quick: QuickBand | null; removedKeys: string[] }) => Promise<boolean>;
 	} = $props();
 
+	let textarea = $state<HTMLTextAreaElement | null>(null);
 	let text = $state('');
 	let quick: QuickBand | null = $state(null);
 	let focused = $state(false);
@@ -30,11 +39,20 @@
 		'no log needed, but I am listening.'
 	];
 
+	/**
+	 * The chips describe what she heard, so they follow the note a beat behind the typing. What they
+	 * must not do is forget a removal: the reset used to sit on the same 500ms timer as the parse,
+	 * so any keystroke after tapping an x brought the chip straight back half a second later, and
+	 * if you typed nothing at all the x appeared to do nothing. Removals now hold until the note is
+	 * sent or the words actually change enough to be a different note.
+	 */
+	let removedFor = $state('');
 	$effect(() => {
 		const t = text;
+		if (t !== removedFor && removed.length > 0) removed = [];
+		removedFor = t;
 		const timer = setTimeout(() => {
 			debounced = t;
-			removed = [];
 		}, 500);
 		return () => clearTimeout(timer);
 	});
@@ -92,7 +110,18 @@
 
 	async function submit(): Promise<void> {
 		if (busy) return;
-		// the button reads what is typed, but guard here too: Enter must not bypass it
+		// Enter must not bypass this either, so the rule lives in the handler and not on the button.
+		//
+		// An empty box used to be a valid submission: it went through the whole pipeline, cost a
+		// model round trip, and answered a question nobody had asked. The button is deliberately
+		// still pressable rather than dead, because a dead button explains nothing — pressing it
+		// tells you what it wanted.
+		if (!hasSomethingToSend(text, quick)) {
+			toast(emptyNoteMessage(), 'warn');
+			textarea?.focus();
+			return;
+		}
+		// too short to be worth her time is not an error, it is just not ready yet
 		if (text.trim().length > 0 && !noteReady(text)) return;
 		const ok = await onsubmit({ text, quick, removedKeys: removed });
 		if (ok) {
@@ -104,6 +133,13 @@
 	}
 
 	function onKeyDown(e: KeyboardEvent): void {
+		// a bare Enter on an empty box is the same mistake as pressing the button, so it gets the
+		// same answer rather than silence
+		if (e.key === 'Enter' && !e.shiftKey && hasSomethingToSend(text, quick)) {
+			e.preventDefault();
+			void submit();
+			return;
+		}
 		if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
 			e.preventDefault();
 			void submit();
@@ -132,6 +168,7 @@
 		</div>
 
 		<textarea
+			bind:this={textarea}
 			class="field !border-0 !shadow-none !bg-transparent !font-hand !text-[22px] !leading-[1.6] min-h-16 resize-y"
 			style="background-image: repeating-linear-gradient(transparent, transparent 34px, rgba(33,23,19,0.08) 34px, rgba(33,23,19,0.08) 35px)"
 			rows="2"

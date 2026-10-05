@@ -8,7 +8,7 @@
 	import ListTree from 'lucide-svelte/icons/list-tree';
 	import type { Plan, PlanBlock } from '$lib/storage/types';
 	import { ACTION_LABEL, FLAG_LABEL, type Action, type Flag } from '$lib/engine/actions';
-	import { fmtCountdown, hhmmToMin, isCurrentMinute } from '$lib/engine/time';
+	import { fmtCountdown, hhmmToMin, isCurrentMinute, localDateInTz } from '$lib/engine/time';
 	import StickyNote from './StickyNote.svelte';
 	import BlockCard from './BlockCard.svelte';
 	import GooeyToggle from './GooeyToggle.svelte';
@@ -47,6 +47,17 @@
 		minutesLeft: number;
 	}
 
+	/**
+	 * Whether this plan belongs to a day that has already finished.
+	 *
+	 * A block that wraps midnight cannot be judged by the clock alone: 20:00 and 09:00 are both
+	 * past its 07:00 end, but one is the evening before the sleep and the other is the morning
+	 * after it. The date settles it. Until then such a block used to be treated as never ending,
+	 * so a finished night's sleep sat in "next" counting down to nothing and could not be marked
+	 * done — including on the following morning, when the dashboard had already rolled over.
+	 */
+	const planDayOver = $derived(Boolean(plan.local_date) && localDateInTz(tz, now) !== plan.local_date);
+
 	const classified = $derived.by(() => {
 		const list: Classified[] = [];
 		for (const b of plan.output.blocks) {
@@ -54,7 +65,7 @@
 			const e = hhmmToMin(b.end);
 			const overnight = e <= s;
 			const isNow = isCurrentMinute(minutes, b.start, b.end);
-			const ended = overnight ? false : minutes >= e;
+			const ended = overnight ? planDayOver || minutes >= e : minutes >= e;
 			let minutesLeft = 0;
 			if (isNow) {
 				const effEnd = overnight ? e + 1440 : e;
@@ -154,7 +165,7 @@
 		</div>
 	{/if}
 
-	<div class="space-y-4 {busy ? 'opacity-40 pointer-events-none' : ''}">
+	<div class="space-y-4 {busy ? 'opacity-20 pointer-events-none' : ''} transition-opacity">
 		{#if finished}
 			<div class="card p-6 text-center">
 				<p class="font-display text-2xl">DAY DONE.</p>

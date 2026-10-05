@@ -97,6 +97,9 @@ export function coerceHHMM(raw: unknown): string | null {
 	if (!m) return null;
 	const h = Number(m[1]);
 	const min = m[2] ? Number(m[2]) : 0;
+	// models write midnight as 24:00 and it means 00:00. rejecting it dropped the block on the
+	// floor, which for a 20:49 study block meant losing the study and the wind-down with it
+	if (h === 24 && min === 0) return '00:00';
 	if (h > 23 || min > 59) return null;
 	return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
 }
@@ -170,7 +173,18 @@ export function normalizePlan(raw: unknown): CleanPlan | null {
 		if (cleaned.length >= 12) break;
 	}
 
-	const kept = removeOverlaps(sortByStart(cleaned));
+	// A day runs from its earliest block, and anything starting before that belongs after midnight
+	// at the end of it: the only reading that keeps a 20:49-00:00 study and a 00:30 sleep in one
+	// plan instead of deleting one of them.
+	//
+	// The first hour is excluded from that choice on purpose. 00:00 and 00:30 are the far side of
+	// midnight, not the start of a day, so letting them set the anchor would drag the whole
+	// evening after them and scramble the order. If every block sits in that hour there is nothing
+	// else to anchor on, so it falls back to the earliest.
+	const afterFirstHour = cleaned.filter((b) => startOf(b) >= 60);
+	const anchorPool = afterFirstHour.length > 0 ? afterFirstHour : cleaned;
+	const anchorStart = anchorPool.reduce((min, b) => Math.min(min, startOf(b)), 24 * 60);
+	const kept = removeOverlaps(sortByStart(cleaned), anchorStart);
 	if (kept.length === 0) return null;
 
 	const dataNote = coerceText(plan.data_note, 200);
@@ -196,30 +210,32 @@ function sortByStart(blocks: CleanBlock[]): CleanBlock[] {
 	return [...blocks].sort((a, b) => startOf(a) - startOf(b));
 }
 
-function removeOverlaps(sorted: CleanBlock[]): CleanBlock[] {
-	const out: CleanBlock[] = [];
-	for (const b of sorted) {
-		const s = startOf(b);
-		const e = endOf(b);
-		const clash = out.some((o) => {
-			const os = startOf(o);
-			const oe = endOf(o);
-			return s < oe && e > os;
-		});
-		if (!clash) out.push(b);
+/**
+ * Sorted by clock time, a day that runs past midnight is a lie: 01:00 sorts before 23:00, so a
+ * study block sitting inside a 23:00-07:00 sleep block compared as if it were that morning and
+ * both survived. Anchoring on the first block's start lifts any earlier-looking block to the end of
+ * the day, which is where a plan that started in the evening actually puts it.
+ */
+function removeOverlaps(sorted: CleanBlock[], anchor: number): CleanBlock[] {
+	if (sorted.length === 0) return sorted;
+	// `anchor` is the first block of the day as the model wrote it. Any block that looks earlier on
+	// the clock than the anchor belongs after midnight at the end of that same day, so lifting it
+	// by a day is what makes the comparison honest: a 01:00 study block and a 23:00-07:00 sleep
+	// block overlap, and only one of them can stay.
+	//
+	// Resolution happens in lifted order, not clock order. Sorted by raw start, the 01:00 study
+	// comes first, and letting it win would then delete the sleep block that contained it. Real
+	// time order keeps sleep (which starts at 23:00) and discards the study hour inside it.
+	const span = (b: CleanBlock): { s: number; e: number } => {
+		const raw = startOf(b);
+		const s = raw < anchor ? raw + 1440 : raw;
+		return { s, e: s + (endOf(b) - raw) };
+	};
+	const out: { b: CleanBlock; s: number; e: number }[] = [];
+	for (const b of [...sorted].sort((x, y) => span(x).s - span(y).s)) {
+		const { s, e } = span(b);
+		const clash = out.some((o) => s < o.e && e > o.s);
+		if (!clash) out.push({ b, s, e });
 	}
-	return out;
-}
-
-export function planEndsWithinDay(blocks: CleanBlock[], maxMinutesAfterStart = 60): boolean {
-	if (blocks.length === 0) return false;
-	const first = startOf(blocks[0]);
-	return endOf(blocks[blocks.length - 1]) - first <= 1440 - maxMinutesAfterStart + 1440;
-}
-
-export function shiftPlanForward(blocks: CleanBlock[], fromMinute: number): CleanBlock[] {
-	return blocks.map((b) => ({
-		...b,
-		start: minToHHMM(Math.max(startOf(b), fromMinute))
-	}));
+	return out.map((o) => o.b);
 }

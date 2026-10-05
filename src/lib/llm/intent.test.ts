@@ -47,6 +47,24 @@ describe('parseOneShot intent routing', () => {
 		expect(r.plan).not.toBeNull();
 	});
 
+	it('reads an omitted intent with a reply and no blocks as chat, not a broken plan', () => {
+		// the model forgot the key entirely; burning a repair retry here would be wasteful
+		const r = parseOneShot(envelope({ understanding: null, advice: 'ha. did you eat?', plan: null }));
+		expect(r.intent).toBe('chat');
+		expect(r.issue).toBeUndefined();
+	});
+
+	it('still reads an omitted intent with blocks as plan', () => {
+		const r = parseOneShot(envelope({ understanding: null, advice: null, plan }));
+		expect(r.intent).toBe('plan');
+	});
+
+	it('reads an omitted intent with nothing at all as plan, so the repair path still fires', () => {
+		const r = parseOneShot(envelope({ understanding: null, advice: null, plan: null }));
+		expect(r.intent).toBe('plan');
+		expect(r.issue).toBeTruthy();
+	});
+
 	it('defaults to plan when the model forgets to declare intent', () => {
 		const r = parseOneShot(envelope({ understanding: null, advice: null, plan }));
 		expect(r.intent).toBe('plan');

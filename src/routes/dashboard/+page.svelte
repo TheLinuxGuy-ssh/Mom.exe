@@ -4,11 +4,12 @@
 	import History from 'lucide-svelte/icons/history';
 	import Settings from 'lucide-svelte/icons/settings';
 	import LogOut from 'lucide-svelte/icons/log-out';
-	import LoaderCircle from 'lucide-svelte/icons/loader-circle';
 	import type { Checkin, Message, Plan, PlanBlock, Profile } from '$lib/storage/types';
 	import { getStorage } from '$lib/storage';
 	import { getSession, clearSession } from '$lib/auth/session';
 	import { getAuthToken, getSessionUser, signOut as supabaseSignOut } from '$lib/auth/supabase';
+	import { newVisitId } from '$lib/visit';
+	import { emptyNoteMessage, hasSomethingToSend } from '$lib/engine/prompt-rules';
 	import { buildContext, buildTodayInfo, buildPriorPlan } from '$lib/engine/context';
 	import { computeStats } from '$lib/engine/stats';
 	import {
@@ -19,20 +20,29 @@
 	} from '$lib/engine/extract';
 	import { scrubText } from '$lib/engine/scrub';
 	import { daysAgoLocalDate, localDateInTz } from '$lib/engine/time';
-import { DIGEST_WEEKS, MEMORY_WINDOW, selectDigestBatches, toContextWindow } from '$lib/engine/memory';
+import {
+	DIGEST_BATCH,
+	DIGEST_WEEKS,
+	MEMORY_WINDOW,
+	selectDigestBatches,
+	toContextWindow
+} from '$lib/engine/memory';
 	import { generateFromNote } from '$lib/llm/generate';
 	import Composer from '$lib/components/Composer.svelte';
 import ConversationDialog from '$lib/components/ConversationDialog.svelte';
-import { NUDGE_EVERY, pickNudge } from '$lib/engine/nudge';
+
 import SleepWidget from '$lib/components/SleepWidget.svelte';
 import MealsWidget from '$lib/components/MealsWidget.svelte';
 import DayShape from '$lib/components/DayShape.svelte';
-import NudgeNote from '$lib/components/NudgeNote.svelte';
+import CatVisit from '$lib/components/CatVisit.svelte';
+	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 	import Timeline from '$lib/components/Timeline.svelte';
 	import SleepStrip from '$lib/components/SleepStrip.svelte';
 	import MealStrip from '$lib/components/MealStrip.svelte';
 	import MomRead from '$lib/components/MomRead.svelte';
 	import Mascot from '$lib/components/Mascot.svelte';
+	import DashboardSkeleton from '$lib/components/DashboardSkeleton.svelte';
+	import PlanSkeleton from '$lib/components/PlanSkeleton.svelte';
 	import { toast } from '$lib/stores/toast';
 
 	let profile = $state<Profile | null>(null);
@@ -40,7 +50,16 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 	let plan = $state<Plan | null>(null);
 	let marks = $state<Record<string, 'yes' | 'no'>>({});
 	let messages = $state<Message[]>([]);
+	/**
+	 * One conversation per opening the app. Reopening starts a clean chat box, which is what
+	 * actually happened: they closed it. The transcript is not lost, it is filed under this id in
+	 * the history, and the context engine below still reads the last 20 messages across every
+	 * session, so mom carries the thread forward even though the screen starts empty.
+	 */
+	let sessionId = $state(newVisitId());
 	let chatOpen = $state(false);
+	/** signing out is easy to do by accident from a row of small icon buttons */
+	let askSignOut = $state(false);
 	let now = $state(new Date());
 	let busy = $state(false);
 	let loading = $state(true);
@@ -50,9 +69,47 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 	const today = $derived(profile ? localDateInTz(profile.timezone, now) : '');
 	const todayCheckin = $derived(checkins.find((c) => c.local_date === today) ?? null);
 
+	/**
+	 * Only this visit's lines, so reopening the app opens an empty conversation. `messages` still
+	 * holds everything, because that is what the context window and the history are built from.
+	 * Newest-first, which is what the dialog expects and reverses for display.
+	 */
+	const sessionMessages = $derived(messages.filter((m) => m.session_id === sessionId));
+
+	/**
+	 * What they just typed, shown while she is still reading it. The exchange is only written to
+	 * storage once the model has answered, which is 5-15s later, so without this the student's own
+	 * message would appear at the same moment as her reply and the wait would look like nothing
+	 * happened. This is the echo of a message that already exists; the dialog retires it as soon as
+	 * the stored copy arrives, matched by text and time.
+	 */
+	let pendingChat = $state<Message | null>(null);
+	let flipping = $state(false);
+	let signingOut = $state(false);
+
 	$effect(() => {
 		const timer = setInterval(() => (now = new Date()), 15000);
 		return () => clearInterval(timer);
+	});
+
+	/**
+	 * Midnight, handled. The clock ticks every 15s so `today` moves on, but nothing re-read: the
+	 * page went on showing yesterday's plan, yesterday's check-in and a conversation thread about
+	 * yesterday, with no way to get to today without a reload. A new day is also a new visit, since
+	 * the chat panel is meant to open onto the current sitting and nothing older.
+	 */
+	let lastDay = $state('');
+	$effect(() => {
+		const day = today;
+		if (!day || !profile) return;
+		if (lastDay === '') {
+			lastDay = day;
+			return;
+		}
+		if (day === lastDay) return;
+		lastDay = day;
+		sessionId = newVisitId();
+		void refresh();
 	});
 
 	$effect(() => {
@@ -69,37 +126,55 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 			goto('/login');
 			return;
 		}
-		if (session.mode === 'supabase') {
-			await getSessionUser();
+		try {
+			if (session.mode === 'supabase') {
+				await getSessionUser();
+			}
+			const storage = getStorage();
+			const p = await storage.getProfile(session.userId).catch(() => null);
+			if (!p) {
+				goto('/onboarding');
+				return;
+			}
+			profile = p;
+			await refresh();
+		} finally {
+			// loading is cleared whatever happens above. one rejected read used to leave the page on
+			// its skeleton forever, which looks exactly like the app is still thinking
+			loading = false;
 		}
-		const storage = getStorage();
-		const p = await storage.getProfile(session.userId).catch(() => null);
-		if (!p) {
-			goto('/onboarding');
-			return;
-		}
-		profile = p;
-		await refresh();
-		loading = false;
 	});
 
+	/**
+	 * Each read degrades on its own. The dashboard is assembled from four separate calls, and if
+	 * any one of them throws the student gets an empty page with no explanation at all — losing the
+	 * chat history is a nuisance, losing the plan while the week strip still renders is confusing,
+	 * and neither is worth a blank screen. So a failed read keeps the screen it can still draw.
+	 */
 	async function refresh(): Promise<void> {
 		if (!session || !profile) return;
 		const storage = getStorage();
 		const tz = profile.timezone;
 		const todayStr = localDateInTz(tz);
-		checkins = await storage.listCheckins(session.userId, daysAgoLocalDate(tz, 14));
-		plan = await storage.getActivePlan(session.userId, todayStr);
+		checkins = await storage
+			.listCheckins(session.userId, daysAgoLocalDate(tz, 14))
+			.catch(() => []);
+		plan = await storage.getActivePlan(session.userId, todayStr).catch(() => null);
 		if (plan) await loadMarks(plan.id);
-		messages = await storage.listMessages(session.userId, 200);
+		messages = await storage.listMessages(session.userId, 200).catch(() => []);
 	}
 
 	async function loadMarks(planId: string): Promise<void> {
 		if (!session) return;
-		const rows = await getStorage().listFollowups(session.userId, [planId]);
+		const rows = await getStorage()
+			.listFollowups(session.userId, [planId])
+			.catch(() => []);
 		const map: Record<string, 'yes' | 'no'> = {};
 		for (const r of rows) {
-			if (r.followed !== 'na') map[r.block_ref] = r.followed;
+			// rows come back newest first, so the first row seen for a block is the mark they gave
+			// it last. Assigning unconditionally would let an older row win.
+			if (r.followed === 'na') continue;
+			if (map[r.block_ref] === undefined) map[r.block_ref] = r.followed;
 		}
 		marks = map;
 	}
@@ -137,7 +212,17 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 	 * replan runs while the chat turn is still marked busy, so going through runOneShot would
 	 * bounce off its guard and the replan would silently never happen.
 	 */
-	async function planOnce(note: string | null, quick: string | null, removedKeys: string[]): Promise<boolean> {
+	/**
+	 * `fromHandoff` means the caller already logged the student's line as chat and is replanning
+	 * off the back of it, so the placeholder "asked for a fresh plan" would put their words in the
+	 * log twice.
+	 */
+	async function planOnce(
+		note: string | null,
+		quick: string | null,
+		removedKeys: string[],
+		fromHandoff = false
+	): Promise<boolean> {
 		if (!session || !profile) return false;
 		try {
 			const storage = getStorage();
@@ -157,11 +242,14 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 			// conversation memory: recent window verbatim, older weeks as digests, and
 			// anything that has aged out of both queued for summarising on this same call
 			const stored = await storage.listMessages(session.userId, 200);
+			// four weeks go into the model's context; the full history is what says which weeks
+			// have already been summarized, and passing only four made old weeks re-digest forever
 			const digests = await storage.listWeekDigests(session.userId, DIGEST_WEEKS);
+			const knownDigestWeeks = await storage.listWeekDigests(session.userId, 52);
 			const conversation = {
 				recent: toContextWindow(stored, MEMORY_WINDOW),
 				older_digests: digests.map((d) => ({ week_start: d.week_start, text: d.content })),
-				to_digest: selectDigestBatches(stored, digests, MEMORY_WINDOW)
+				to_digest: selectDigestBatches(stored, knownDigestWeeks, MEMORY_WINDOW, DIGEST_BATCH, todayStr)
 			};
 
 			const { payload: ctxPayload, basis } = buildContext(
@@ -192,12 +280,12 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 			const hasNewFacts = hasAnySignal(merged);
 
 			if ((note || quick || hasNewFacts) && result.intent === 'plan') {
-				const row = mergeCheckinRow(todayCheck, merged, note ?? '', todayStr);
+				const row = mergeCheckinRow(todayCheck, merged, note ?? '', todayStr, removedKeys);
 				await storage.upsertCheckin(session.userId, row);
 			} else if (hasNewFacts && note) {
 				// chat: record the note so the pattern sticks, but do not let the chat itself
 				// stand in for a check-in the student did not intend as one
-				const row = mergeCheckinRow(todayCheck, merged, '', todayStr);
+				const row = mergeCheckinRow(todayCheck, merged, '', todayStr, removedKeys);
 				await storage.upsertCheckin(session.userId, row);
 			}
 
@@ -210,12 +298,22 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 					kind: 'chat',
 					content: note ?? ''
 				});
+				// she decided the day needs redoing: get the chat out of the way first, so the plan
+				// lands on a clean dashboard rather than behind a dialog the student has to close.
+				// Checked before logging her reply, because the replan logs the plan as the answer and
+				// writing this line out as well printed the same answer twice.
+				if (result.handoff === 'replan') {
+					closeChat();
+					await planOnce(null, null, [], true);
+					return true;
+				}
+
 				if (result.advice) {
 					await logExchange(storage, {
 						date: todayStr,
 						role: 'mom',
 						kind: 'chat',
-						content: nudgeIfDue(result.advice, messages)
+						content: result.advice
 					});
 				}
 				await refresh();
@@ -225,16 +323,8 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 					return false;
 				}
 
-// she decided the day needs redoing: get the chat out of the way first, so the plan
-			// lands on a clean dashboard rather than behind a dialog the student has to close
-			if (result.handoff === 'replan') {
-				closeChat();
-				await planOnce(null, null, []);
+				chatOpen = true;
 				return true;
-			}
-
-			chatOpen = true;
-			return true;
 			}
 
 			if (!result.output) {
@@ -243,7 +333,7 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 			}
 
 			if (note || quick || hasNewFacts) {
-				const row = mergeCheckinRow(todayCheck, merged, note ?? '', todayStr);
+				const row = mergeCheckinRow(todayCheck, merged, note ?? '', todayStr, removedKeys);
 				await storage.upsertCheckin(session.userId, row);
 			}
 
@@ -258,18 +348,29 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 				supersedes_plan_id: plan?.id ?? null
 			});
 
-			await logExchange(storage, {
-				date: todayStr,
-				role: 'user',
-				kind: note ? 'note' : 'replan',
-				content: note ?? '(asked for a fresh plan)'
-			});
-			await logExchange(storage, {
-				date: todayStr,
-				role: 'mom',
-				kind: 'replan',
-				content: [result.advice, saved.output.summary].filter(Boolean).join(' ')
-			});
+			if (!fromHandoff) {
+				await logExchange(storage, {
+					date: todayStr,
+					role: 'user',
+					kind: note ? 'note' : 'replan',
+					content: note ?? '(asked for a fresh plan)'
+				});
+			}
+
+			// One reply in the conversation, never two. Writing advice AND summary into one stored
+			// message is what made her look like she was answering twice: the two fields routinely
+			// say the same thing in different words, and joined together they pass the length at
+			// which a reply is split into bubbles, so a single line came out as two on screen.
+			// Take whichever she actually wrote; the plan itself is on the timeline either way.
+			const replyInChat = result.advice?.trim() || saved.output.summary.trim();
+			if (replyInChat) {
+				await logExchange(storage, {
+					date: todayStr,
+					role: 'mom',
+					kind: 'replan',
+					content: replyInChat
+				});
+			}
 
 			plan = saved;
 			marks = {};
@@ -288,7 +389,14 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 
 	async function submitNote(payload: { text: string; quick: string | null; removedKeys: string[] }): Promise<boolean> {
 		const raw = payload.text.trim();
-		return runOneShot(raw ? scrubText(raw) : null, payload.quick, payload.removedKeys);
+		// The composer already refuses this, and it is checked again here on purpose: this is the
+		// only boundary between a student's keystrokes and a paid model round trip, and the composer
+		// is a component that can be edited without anyone reading this file.
+		if (!hasSomethingToSend(raw, payload.quick)) {
+			toast(emptyNoteMessage(), 'warn');
+			return false;
+		}
+		return runOneShot(scrubText(raw) || null, payload.quick, payload.removedKeys);
 	}
 
 	/**
@@ -305,43 +413,76 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 	 * answer rather than the student choosing a mode first.
 	 */
 	async function submitChat(text: string): Promise<boolean> {
-		const ok = await runOneShot(scrubText(text.trim()), null, []);
-		if (!chatOpen) return ok;
-		// she closed it herself to replan, or the exchange is already in the log
-		return ok;
+		// punctuation and "idk" are what arrive when someone hits enter without really typing. the
+		// classifier sends those to the planner, which would burn a plan generation and overwrite a
+		// good one with a reply to nothing
+		const trimmed = text.trim();
+		if (trimmed === '' || /^[.!?…\s]+$/.test(trimmed) || /^(idk|idc|lol|hmm+|huh)\b/i.test(trimmed)) {
+			return false;
+		}
+		// on screen before the model is even called, so the wait reads as her thinking rather than
+		// as a dead button
+		pendingChat = {
+			id: `pending-${Date.now()}`,
+			user_id: session?.userId ?? '',
+			local_date: profile ? localDateInTz(profile.timezone, now) : '',
+			role: 'user',
+			kind: 'chat',
+			content: scrubText(trimmed),
+			created_at: new Date().toISOString(),
+			session_id: sessionId
+		};
+		try {
+			return await runOneShot(scrubText(trimmed), null, []);
+		} finally {
+			// whatever happened, the echo has done its job: either the stored copy has taken over, or
+			// the exchange failed and there is nothing to show for it
+			pendingChat = null;
+		}
 	}
 
 	async function flipMeal(slot: 'b' | 'l' | 's' | 'd'): Promise<void> {
-		if (!session || !profile || !todayCheckin) return;
+		if (!session || !profile || !todayCheckin || flipping) return;
 		const meals = { ...(todayCheckin.meals ?? { b: null, l: null, s: null, d: null }) };
 		meals[slot] = meals[slot] === true ? false : true;
 		const { id: _id, user_id: _u, created_at: _c, ...rest } = todayCheckin;
-		await getStorage().upsertCheckin(session.userId, { ...rest, meals, source: 'note' });
+		// show the tap immediately, then put it back if the write failed. the tap used to await an
+		// unguarded write, so a dropped connection looked exactly like the app ignoring you
+		const previous = todayCheckin;
+		const shown = { ...previous, meals };
+		checkins = checkins.map((c) => (c.local_date === today ? shown : c));
+		flipping = true;
+		try {
+			await getStorage().upsertCheckin(session.userId, { ...rest, meals, source: 'note' });
+		} catch (err) {
+			console.error(err);
+			checkins = checkins.map((c) => (c.local_date === today ? previous : c));
+			toast('could not save that. check your connection.', 'warn');
+			return;
+		} finally {
+			flipping = false;
+		}
 		await refresh();
-		toast('fixed.');
 	}
 
 	async function markBlock(block: PlanBlock, followed: 'yes' | 'no'): Promise<void> {
 		if (!session || !plan) return;
-		marks = { ...marks, [`${block.start}-${block.end}`]: followed };
+		const ref = `${block.start}-${block.end}`;
+		const previous = marks[ref];
+		marks = { ...marks, [ref]: followed };
 		try {
 			await getStorage().saveFollowups(session.userId, plan.id, [
-				{ action: block.action, block_ref: `${block.start}-${block.end}`, followed }
+				{ action: block.action, block_ref: ref, followed }
 			]);
 		} catch {
-			toast('could not save that, but noted on screen', 'warn');
+			// put it back. leaving the mark on screen told the planner a block was done or skipped
+			// when storage says it never was, and the student could not see that it had not saved
+			const rolled = { ...marks };
+			if (previous === undefined) delete rolled[ref];
+			else rolled[ref] = previous;
+			marks = rolled;
+			toast('could not save that', 'warn');
 		}
-	}
-
-	/**
-	 * Every fifth conversation, mom points the student back at the person who actually knows
-	 * them. Deterministic on purpose: an LLM told to "occasionally" will do it at the wrong
-	 * moment, and this line has to land gently rather than become nagging.
-	 */
-	function nudgeIfDue(reply: string, history: Message[]): string {
-		const chats = history.filter((m) => m.kind === 'chat' && m.role === 'user').length;
-		if ((chats + 1) % NUDGE_EVERY !== 0) return reply;
-		return `${reply} ${pickNudge(history.length)}`;
 	}
 
 	/**
@@ -355,7 +496,9 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 			try {
 				await storage.saveWeekDigest(session.userId, { week_start: d.week, content: d.text });
 			} catch {
-				return;
+				// one week failing must not abandon the rest. the raw messages are still on disk and
+				// the week is simply uncovered, so it gets picked up on a later call
+				continue;
 			}
 		}
 	}
@@ -369,7 +512,13 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 		if (!content) return;
 		try {
 			await storage.appendMessages(session.userId, [
-				{ local_date: row.date, role: row.role, kind: row.kind, content: content.slice(0, 2000) }
+				{
+					local_date: row.date,
+					role: row.role,
+					kind: row.kind,
+					content: content.slice(0, 2000),
+					session_id: sessionId
+				}
 			]);
 		} catch {
 			/* the conversation log is a convenience, never a blocker for the plan */
@@ -377,22 +526,31 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 	}
 
 	async function signOut(): Promise<void> {
-		await supabaseSignOut();
-		clearSession();
-		goto('/');
+		askSignOut = false;
+		signingOut = true;
+		try {
+			await supabaseSignOut();
+		} catch (err) {
+			// the local session is cleared either way. leaving the student on the dashboard because
+			// a network call failed is the one outcome worse than an ambiguous server state
+			console.error(err);
+		} finally {
+			signingOut = false;
+			clearSession();
+			await goto('/');
+		}
 	}
 </script>
 
 <svelte:head><title>Today — Mom.exe</title></svelte:head>
 
 {#if loading}
-	<div class="min-h-[70vh] grid place-items-center">
-		<LoaderCircle class="w-8 h-8 animate-spin text-brown" />
-	</div>
+	<DashboardSkeleton />
 {:else if profile}
+<CatVisit />
 	<div
 		class="mx-auto w-[min(1180px,calc(100%-1.5rem))] py-6
-			xl:grid xl:grid-cols-[240px_minmax(0,880px)_240px] xl:gap-8 xl:items-start"
+			xl:grid xl:grid-cols-[240px_minmax(0,880px)_240px] xl:gap-8 xl:items-start h-full"
 	>
 		<aside class="hidden xl:block space-y-5">
 			<SleepWidget {checkins} {today} target={7.5} />
@@ -408,42 +566,41 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 				<div class="flex items-center gap-2">
 					<a href="/history" class="btn !rounded-full p-2.5" title="plan history"><History class="w-4 h-4" /></a>
 					<a href="/settings" class="btn !rounded-full p-2.5" title="settings"><Settings class="w-4 h-4" /></a>
-					<button type="button" class="btn !rounded-full p-2.5" title="log out" onclick={() => void signOut()}><LogOut class="w-4 h-4" /></button>
+					<button
+						type="button"
+						class="btn !rounded-full p-2.5"
+						title="log out"
+						aria-label="log out"
+						onclick={() => (askSignOut = true)}
+					><LogOut class="w-4 h-4" /></button
+					>
 				</div>
 			</header>
 
 			<Composer busy={busy} onsubmit={submitNote} />
 
-			<NudgeNote {today} />
 
 		<ConversationDialog
 				open={chatOpen}
-				{messages}
+				messages={sessionMessages}
+				pending={pendingChat}
 				{busy}
 				{waited}
 				onsubmit={submitChat}
 				onclose={closeChat}
 			/>
 
-			{#if todayCheckin && !busy && (todayCheckin.quick || todayCheckin.notes || todayCheckin.sleep_hours != null || todayCheckin.meals)}
-				<MomRead checkin={todayCheckin} onflip={(slot) => void flipMeal(slot)} />
+			{#if todayCheckin && (todayCheckin.quick || todayCheckin.notes || todayCheckin.sleep_hours != null || todayCheckin.meals)}
+				<div class="{busy ? 'opacity-25 pointer-events-none' : ''} transition-opacity">
+					<MomRead checkin={todayCheckin} onflip={(slot) => void flipMeal(slot)} />
+				</div>
 			{/if}
 
 			{#if busy && !plan}
-				<div class="max-w-2xl mx-auto card p-6 space-y-4 !bg-paper/80">
-					<div class="flex items-center gap-3">
-						<LoaderCircle class="w-5 h-5 animate-spin text-brown" />
-						<p class="font-black uppercase tracking-wide text-brown text-sm">mom is reading your note... {waited}s</p>
-					</div>
-					<div class="space-y-2">
-						<div class="h-10 bg-ink/5 rounded-xl"></div>
-						<div class="h-10 bg-ink/5 rounded-xl w-3/4"></div>
-						<div class="h-10 bg-ink/5 rounded-xl w-1/2"></div>
-					</div>
-					<p class="text-[11px] text-mute font-semibold">
-						open-weight models think for 10-25s before answering. if it takes too long, i plan in code instead and you still get a real plan.
-					</p>
-				</div>
+				<PlanSkeleton
+					counter={waited}
+					note="open-weight models think for 10-25s before answering. if it takes too long, i plan in code instead and you still get a real plan."
+				/>
 			{:else if plan}
 				<Timeline {plan} {now} tz={profile.timezone} {marks} busy={busy} onmark={markBlock} />
 			{:else}
@@ -459,7 +616,7 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 				</div>
 			{/if}
 
-			<footer class="card !rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
+			<footer class="card !rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4 xl:hidden">
 				<MealStrip meals={todayCheckin?.meals ?? null} />
 				<SleepStrip {checkins} {today} />
 			</footer>
@@ -473,4 +630,15 @@ import NudgeNote from '$lib/components/NudgeNote.svelte';
 			<DayShape blocks={plan?.output.blocks ?? []} />
 		</aside>
 	</div>
+
+	<ConfirmDialog
+		open={askSignOut}
+		title="log out?"
+		confirmLabel="log out"
+		busy={signingOut}
+		onconfirm={() => void signOut()}
+		oncancel={() => (askSignOut = false)}
+	>
+		Your check-ins and plans will be here when you return.
+	</ConfirmDialog>
 {/if}

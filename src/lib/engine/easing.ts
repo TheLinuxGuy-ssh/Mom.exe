@@ -29,9 +29,6 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t:
 /** Decelerating curve for things arriving on screen. */
 export const EASE_OUT = cubicBezier(0.16, 1, 0.3, 1);
 
-/** Accelerating curve for things leaving. */
-export const EASE_IN = cubicBezier(0.7, 0, 0.84, 0);
-
 /**
  * Near-linear and symmetric. A crossfade needs the two layers to stay complementary, so the
  * curve must not run fast at the start and trail off, which is what a front-loaded ease-out

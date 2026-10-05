@@ -98,11 +98,14 @@ export class SupabaseStorage implements Storage {
 
 	async listFollowups(userId: string, planIds: string[]): Promise<Followup[]> {
 		if (planIds.length === 0) return [];
+		// newest first, because marking a block twice appends a row rather than updating it, and the
+		// caller folds rows in order: without this the mark shown is whichever row landed last
 		const { data, error } = await this.client
 			.from('followups')
 			.select('*')
 			.eq('user_id', userId)
-			.in('plan_id', planIds);
+			.in('plan_id', planIds)
+			.order('created_at', { ascending: false });
 		if (error) throw new Error(error.message);
 		return (data as Followup[]) ?? [];
 	}

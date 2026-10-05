@@ -1,8 +1,18 @@
 <script lang="ts">
 	import '../app.css';
 	import Toast from '$lib/components/Toast.svelte';
+	import { onMount } from 'svelte';
+	import { touchCatDay } from '$lib/engine/cat-visit';
 
 	let { children } = $props();
+
+	/**
+	 * The cat counts time spent anywhere in the app, not time on the dashboard, so the day's
+	 * first sighting is stamped here rather than in the component that eventually shows it.
+	 */
+	onMount(() => {
+		touchCatDay();
+	});
 </script>
 
 <svg width="0" height="0" style="position: absolute" aria-hidden="true">

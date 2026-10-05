@@ -22,6 +22,24 @@ describe('MOM_VOICE', () => {
 		);
 	});
 
+	it('states which of the two she is, so she cannot answer in their chair', () => {
+		// the greeting "hey ma" once came back as "hi ma, i'm fine. how's your sunday treating
+		// you?" - the model became the child. This is the rule that stops it.
+		// the prompt is hard-wrapped, so match on flattened text rather than on the source layout
+		const flat = MOM_VOICE.replace(/\s+/g, ' ');
+		expect(flat).toMatch(/WHICH OF YOU SHE IS/);
+		expect(flat).toMatch(/YOU ARE THE MUM\./);
+		expect(flat).toMatch(/NEVER address them as "ma", "maa", "mum", "mommy" or "mom"/);
+		expect(flat).toMatch(/NEVER answer as the child\./);
+		expect(flat).toMatch(/they are greeting YOU, their mother/);
+	});
+
+	it('reads that role rule into both prompts that have her speak', () => {
+		for (const prompt of [SYSTEM_ONESHOT_PROMPT, SYSTEM_PLAN_PROMPT]) {
+			expect(prompt).toContain('WHICH OF YOU SHE IS');
+		}
+	});
+
 	it('states the taunt boundary as a hard rule, not a suggestion', () => {
 		expect(MOM_VOICE).toContain('THE HARD LINE');
 		expect(MOM_VOICE).toMatch(/does not taunt someone who is actually hurting/i);
@@ -70,6 +88,66 @@ describe('MOM_VOICE', () => {
 		}
 	});
 
+	it('bans the service-desk closers by name', () => {
+		for (const phrase of [
+			'let me know if',
+			'feel free to',
+			'want me to',
+			"I'm here if",
+			"don't hesitate",
+			'I hope this helps'
+		]) {
+			expect(SYSTEM_ONESHOT_PROMPT).toContain(phrase);
+		}
+		expect(SYSTEM_ONESHOT_PROMPT).toMatch(/She DECLARES/);
+		expect(SYSTEM_ONESHOT_PROMPT).toMatch(/End a reply with a verdict, a question, or an instruction/);
+	});
+
+	it('allows nagging about food, which is how she actually loves', () => {
+		expect(SYSTEM_ONESHOT_PROMPT).toMatch(/NAGGING IS HOW SHE LOVES/);
+		expect(SYSTEM_ONESHOT_PROMPT).toMatch(/What stays banned is attaching failure/);
+	});
+
+	it('no longer contains the rule that sterilised her', () => {
+		// this line is what produced "let me know if you want to tweak anything"
+		expect(SYSTEM_ONESHOT_PROMPT).not.toMatch(/Never lecture about sleep, meals or habits/);
+		expect(SYSTEM_ONESHOT_PROMPT).not.toMatch(/answer\s+it and stop/i);
+	});
+
+	it('permits a one word reply, which is stronger than three sentences', () => {
+		expect(SYSTEM_ONESHOT_PROMPT).toMatch(/ONE WORD IS A COMPLETE REPLY/);
+	});
+
+	it('tells her to hold receipts when the memory shows a repeated promise', () => {
+		expect(SYSTEM_ONESHOT_PROMPT).toMatch(/HOLD RECEIPTS/);
+	});
+
+	it('carries the rendered moves into the one-shot prompt', () => {
+		expect(SYSTEM_ONESHOT_PROMPT).toContain('THE MOVES.');
+		expect(SYSTEM_ONESHOT_PROMPT).toContain('LANGUAGE GATE');
+	});
+
+	it('keeps tone subordinate to intent', () => {
+		expect(SYSTEM_ONESHOT_PROMPT).toMatch(/TONE NEVER AFFECTS INTENT/);
+		expect(SYSTEM_ONESHOT_PROMPT.indexOf('STEP 1, BEFORE ANYTHING')).toBeLessThan(
+			SYSTEM_ONESHOT_PROMPT.indexOf('TONE NEVER AFFECTS INTENT')
+		);
+	});
+
+	it('explains the nickname channel and the privacy carve out', () => {
+		expect(SYSTEM_ONESHOT_PROMPT).toContain('CONTEXT.nickname');
+		expect(SYSTEM_ONESHOT_PROMPT).toMatch(/do not ask for or invent an email address or a birth year/);
+	});
+
+	it('still keeps the medical and streaks guarantees under all this new voice', () => {
+		expect(SYSTEM_ONESHOT_PROMPT).toMatch(/never diagnose/);
+		expect(SYSTEM_ONESHOT_PROMPT).toMatch(/never mention calories or weight/);
+		expect(SYSTEM_ONESHOT_PROMPT).toMatch(/No streaks, no guilt, no scorekeeping/);
+		expect(SYSTEM_ONESHOT_PROMPT.replace(/\s+/g, ' ')).toMatch(
+			/Never scold, never lecture, never tally failures/
+		);
+	});
+
 	it('keeps the no-guilt rule binding even while being funny', () => {
 		expect(SYSTEM_ONESHOT_PROMPT).toMatch(/This holds even when you are being funny/);
 	});
@@ -82,7 +160,7 @@ describe('MOM_VOICE', () => {
 describe('prompt safety rules survive the voice', () => {
 	it('still forbids shaming, streaks and guilt in the planning prompt', () => {
 		expect(SYSTEM_ONESHOT_PROMPT).toMatch(/NEVER say they failed/);
-		expect(SYSTEM_ONESHOT_PROMPT).toMatch(/No streaks, no guilt, no scorekeeping/);
+		expect(SYSTEM_ONESHOT_PROMPT.replace(/\s+/g, ' ')).toMatch(/No streaks, no guilt, no scorekeeping/);
 		expect(SYSTEM_PLAN_PROMPT).toMatch(/never scold/);
 	});
 

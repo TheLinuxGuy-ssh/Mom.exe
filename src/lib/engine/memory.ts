@@ -14,7 +14,7 @@ export const DIGEST_WEEKS = 4;
 const MSG_CHARS = 240;
 
 /** Upper bound on messages handed to the model for digesting in a single call. */
-const DIGEST_BATCH = 40;
+export const DIGEST_BATCH = 40;
 
 export interface ContextMessage {
 	role: 'user' | 'mom';
@@ -36,8 +36,11 @@ export function weekStartOf(localDate: string): string {
 
 /**
  * Newest-first storage order in, chronological order out — models read a conversation forwards.
- * Only the outbound copy is scrubbed; what is stored stays as the user wrote it, because the
- * history page shows their own words back to them.
+ *
+ * Messages are scrubbed by the time they are stored, so the copy the model reads is the copy the
+ * history shows. That is the point of scrubbing: PII the student typed never reaches the database,
+ * which is the stronger promise, at the cost of their history reading back with a few things
+ * replaced by `[email]` or similar.
  */
 export function toContextWindow(messages: Message[], window = MEMORY_WINDOW): ContextMessage[] {
 	return messages
@@ -48,20 +51,36 @@ export function toContextWindow(messages: Message[], window = MEMORY_WINDOW): Co
 }
 
 /**
- * Messages that have fallen out of the window and belong to a week that has no digest yet, so
- * each week is only ever summarized once. Capped so the digest request cannot grow unbounded;
- * whatever is left over is picked up on a later call.
+ * Messages that have fallen out of the window and belong to a week with no digest yet.
+ *
+ * Two things this deliberately does not do.
+ *
+ * It never digests the week that is still running. A digest is a summary of a finished week, and
+ * writing one on Monday froze that week at whatever had happened by Monday: everything from
+ * Tuesday onward was then excluded as already covered, and a long conversation was permanently
+ * remembered as only its first few messages.
+ *
+ * It never digests a week it already has a digest for, however old. The caller passes the whole
+ * digest history here, not just the four newest that go into the model's context, because the four
+ * newest do not describe which weeks have been summarized: a week outside that window was
+ * re-sent on every single planning call, re-summarized, and overwritten from a partial batch.
+ *
+ * The cap keeps one request from growing unbounded. Past it, the oldest messages of that week are
+ * what falls off, which is the right thing to lose: they are the furthest from today.
  */
 export function selectDigestBatches(
 	messages: Message[],
 	digests: WeekDigest[],
 	window = MEMORY_WINDOW,
-	limit = DIGEST_BATCH
+	limit = DIGEST_BATCH,
+	todayLocal: string = ''
 ): DigestBatchMessage[] {
 	const covered = new Set(digests.map((d) => d.week_start));
+	const thisWeek = todayLocal ? weekStartOf(todayLocal) : null;
 	const stale = messages
 		.slice(window)
 		.filter((m) => !covered.has(weekStartOf(m.local_date)))
+		.filter((m) => weekStartOf(m.local_date) !== thisWeek)
 		.slice(0, limit);
 
 	return stale.map((m) => ({

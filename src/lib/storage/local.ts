@@ -132,8 +132,13 @@ export class LocalStorage implements Storage {
 
 	async saveFollowups(userId: string, planId: string, rows: Omit<FollowupInput, 'plan_id'>[]): Promise<void> {
 		const list = read<Followup[]>(key(userId, 'followups'), []);
-		const kept = list.filter((f) => f.plan_id !== planId);
+		const kept = list.slice();
 		for (const r of rows) {
+			// one row per (plan, block): marking a second block must not erase the first one's
+			// mark, which is what dropping every row for the plan did
+			for (let i = kept.length - 1; i >= 0; i--) {
+				if (kept[i]!.plan_id === planId && kept[i]!.block_ref === r.block_ref) kept.splice(i, 1);
+			}
 			const row: Followup = {
 				id: uid(),
 				user_id: userId,
@@ -148,7 +153,10 @@ export class LocalStorage implements Storage {
 
 	async listFollowups(userId: string, planIds: string[]): Promise<Followup[]> {
 		const set = new Set(planIds);
-		return read<Followup[]>(key(userId, 'followups'), []).filter((f) => set.has(f.plan_id));
+		// newest first, matching the hosted backend, so both fold to "the last mark they gave wins"
+		return read<Followup[]>(key(userId, 'followups'), [])
+			.filter((f) => set.has(f.plan_id))
+			.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 	}
 
 	async appendMessages(userId: string, rows: MessageInput[]): Promise<void> {
@@ -159,6 +167,9 @@ export class LocalStorage implements Storage {
 				id: uid(),
 				user_id: userId,
 				created_at: new Date().toISOString(),
+				// older callers do not know about sessions, and a row without one is a conversation
+				// that predates them rather than a broken write
+				session_id: null,
 				...r
 			});
 		}

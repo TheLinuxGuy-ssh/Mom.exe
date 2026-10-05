@@ -89,3 +89,52 @@ describe('computeStats', () => {
 		expect(s.days_since_last_checkin).toBe(4);
 	});
 });
+
+describe('bedtime drift across midnight', () => {
+	/**
+	 * Bedtimes are a circle, not a line. Averaging 23:50 and 00:30 as plain numbers puts 00:30
+	 * "before" 23:50 by 23 hours, so a student drifting half an hour later was reported as
+	 * collapsing by a full day, which the model reads as a crisis.
+	 */
+	function at(dayAgo: number, sleptAt: string, sleepHours = 7): Checkin {
+		return {
+			id: `c${dayAgo}`,
+			user_id: 'u1',
+			local_date: `2026-10-${String(10 - dayAgo).padStart(2, '0')}`,
+			quick: null,
+			sleep_hours: sleepHours,
+			slept_at: sleptAt,
+			woke_at: null,
+			meals: { b: null, l: null, s: null, d: null },
+			mood: null,
+			notes: null,
+			notes_theme: null,
+			created_at: '',
+			updated_at: ''
+		} as unknown as Checkin;
+	}
+
+	it('reads a small drift as a small number, not as most of a day', () => {
+		const rows = [at(0, '00:30'), at(1, '00:20'), at(2, '23:50'), at(3, '23:40')];
+		const s = computeStats(rows, [], 'UTC', '2026-10-10');
+		expect(Math.abs(Number(s.bedtime_drift_hours.value ?? 99))).toBeLessThan(1.5);
+	});
+
+	it('reports no drift rather than a fabricated one when there is too little to compare', () => {
+		const s = computeStats([at(0, '23:30'), at(1, '23:30')], [], 'UTC', '2026-10-10');
+		expect(s.bedtime_drift_hours.value).toBeNull();
+	});
+
+	it('treats no nights as unknown sleep debt, never zero', () => {
+		// the model reads 0.0 as "you are fully rested", which is exactly the guess every prompt
+		// in this app forbids
+		const s = computeStats([], [], 'UTC', '2026-10-10');
+		expect(s.sleep_debt_hours_7d.value).toBeNull();
+		expect(s.sleep_debt_hours_7d.n).toBe(0);
+	});
+
+	it('still reports real debt when there are nights to report', () => {
+		const s = computeStats([at(0, '01:00', 5), at(1, '01:00', 5)], [], 'UTC', '2026-10-10');
+		expect(s.sleep_debt_hours_7d.value).toBe(5);
+	});
+});

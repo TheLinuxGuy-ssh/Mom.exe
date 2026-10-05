@@ -3,7 +3,7 @@ import { buildTodayInfo, basisFor } from '../src/lib/engine/context';
 import { computeStats } from '../src/lib/engine/stats';
 import { hhmmToMin, localDateInTz, minToHHMM, nowMinutesInTz } from '../src/lib/engine/time';
 
-export interface Persona {
+interface Persona {
 	key: string;
 	label: string;
 	profile: ProfileInput;

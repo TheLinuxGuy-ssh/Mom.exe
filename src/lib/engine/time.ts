@@ -10,9 +10,35 @@ export function minToHHMM(m: number): string {
 	return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
+/**
+ * Whether a timezone string is one the runtime actually understands.
+ *
+ * A typo here is worth catching at the point of entry: every date in this app is derived from
+ * `Intl.DateTimeFormat({ timeZone })`, so a bad value throws a RangeError deep inside a refresh and
+ * takes the whole dashboard down rather than showing one wrong date.
+ */
+export function isValidTimezone(tz: string): boolean {
+	if (typeof tz !== 'string' || tz.trim() === '') return false;
+	try {
+		new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date());
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * The timezone to actually format with. Settings refuses to save an invalid zone, but a value
+ * typed before that check existed is still sitting in somebody's profile, and a dashboard that
+ * renders no dates at all is a worse answer than one that renders them in UTC.
+ */
+function safeTz(tz: string): string {
+	return isValidTimezone(tz) ? tz : 'UTC';
+}
+
 export function localDateInTz(tz: string, d: Date = new Date()): string {
 	return new Intl.DateTimeFormat('en-CA', {
-		timeZone: tz,
+		timeZone: safeTz(tz),
 		year: 'numeric',
 		month: '2-digit',
 		day: '2-digit'
@@ -21,7 +47,7 @@ export function localDateInTz(tz: string, d: Date = new Date()): string {
 
 export function nowMinutesInTz(tz: string, d: Date = new Date()): number {
 	const parts = new Intl.DateTimeFormat('en-GB', {
-		timeZone: tz,
+		timeZone: safeTz(tz),
 		hour: '2-digit',
 		minute: '2-digit',
 		hour12: false
@@ -30,7 +56,7 @@ export function nowMinutesInTz(tz: string, d: Date = new Date()): number {
 }
 
 export function weekdayInTz(tz: string, d: Date = new Date()): string {
-	return new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' })
+	return new Intl.DateTimeFormat('en-US', { timeZone: safeTz(tz), weekday: 'long' })
 		.format(d)
 		.toLowerCase();
 }
@@ -54,7 +80,7 @@ export function isCurrentMinute(m: number, start: string, end: string): boolean 
 export function nowLocalWallClock(tz: string, d: Date = new Date()): string {
 	const date = localDateInTz(tz, d);
 	const hm = new Intl.DateTimeFormat('en-GB', {
-		timeZone: tz,
+		timeZone: safeTz(tz),
 		hour: '2-digit',
 		minute: '2-digit',
 		hour12: false
@@ -64,7 +90,7 @@ export function nowLocalWallClock(tz: string, d: Date = new Date()): string {
 
 export function tzOffsetLabel(tz: string, d: Date = new Date()): string {
 	try {
-		const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset' })
+		const parts = new Intl.DateTimeFormat('en-US', { timeZone: safeTz(tz), timeZoneName: 'shortOffset' })
 			.formatToParts(d)
 			.find((p) => p.type === 'timeZoneName');
 		return parts?.value ?? tz;
