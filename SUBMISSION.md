@@ -33,6 +33,34 @@ It also has a deterministic planner written in plain code, used when the model i
 untrustworthy. That sounds like a fallback, but it turned out to be the honest answer to a problem I
 could not solve with prompting — see the measurements below.
 
+### About the mother
+
+The name is not a joke. The coach talks like the good half of a mother: the one who already knows you
+had a rough night and skips straight to what can still go right today. No scorecards, no sighing, no
+"again?".
+
+Here is a real exchange from a live run of the harness, unedited. She is given:
+
+> honestly today was awful. the seminar ran 2 hours over and i could not focus for anything after
+
+and replies:
+
+> ha. seminar over, focus gone. grab a glass of water, stretch, then pick a light task.
+
+That is the whole thesis in two sentences. She does not ask what went wrong, because she was told. She
+does not say "unfortunately" or "try to do better today." She names the thing that actually happened,
+does not make it larger than it is, and hands back one small next move that is still possible tonight.
+
+Getting her *not* to say "again?" took more work than any feature here. It is a prompt rule, but a
+prompt rule is a request, not a guarantee — so the reply also passes through a deterministic pass that
+strips the scorekeeper constructions and the assistant-shaped openers by hand. A live run produced
+"you missed dinner again" and "i hear you" despite both being explicitly banned in the prompt; the
+code catches what the prompt only discourages.
+
+The one voice failure I know about and have not fixed: she still occasionally opens a reply with "i
+hear you're hurting," which is precisely the register the rest of this section is arguing against. It
+is in the demo because leaving it out would make this read better than the app is.
+
 ## Demo
 
 - Live: [momexe.vercel.app](https://momexe.vercel.app)
