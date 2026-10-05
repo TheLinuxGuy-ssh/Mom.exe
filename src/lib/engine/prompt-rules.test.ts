@@ -8,7 +8,8 @@ import {
 	noteReady,
 	noteShortfall,
 	readyLabel,
-	hasSomethingToSend
+	hasSomethingToSend,
+	shouldDismissChat
 } from './prompt-rules';
 
 describe('note minimum', () => {
@@ -127,5 +128,28 @@ describe('refusing an empty submission', () => {
 		expect(hasSomethingToSend('idk', null)).toBe(true);
 		expect(hasSomethingToSend('Hi.', null)).toBe(true);
 		expect(hasSomethingToSend('slept at 2', null)).toBe(true);
+	});
+});
+
+describe('dismissing the conversation after a replan', () => {
+	/**
+	 * The bug this rule exists for: a replan asked for from inside the chat is decided in code as a
+	 * planning request, so it arrives as a plain plan save rather than the conversational handoff —
+	 * and the handoff branch is the only one that closed the dialog. The student watched a plan get
+	 * rewritten behind a dialog that would not go away.
+	 */
+	it('closes the dialog when a chat-submitted turn rewrote the day', () => {
+		expect(shouldDismissChat({ chatOpen: true, planSaved: true })).toBe(true);
+	});
+
+	it('leaves the composer path exactly as it was', () => {
+		// nothing was open, so nothing may close
+		expect(shouldDismissChat({ chatOpen: false, planSaved: true })).toBe(false);
+	});
+
+	it('never dismisses into nothing', () => {
+		// a plan that failed to write leaves the dialog up with the error in it
+		expect(shouldDismissChat({ chatOpen: true, planSaved: false })).toBe(false);
+		expect(shouldDismissChat({ chatOpen: false, planSaved: false })).toBe(false);
 	});
 });

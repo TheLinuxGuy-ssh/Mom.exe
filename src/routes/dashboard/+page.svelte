@@ -9,7 +9,7 @@
 	import { getSession, clearSession } from '$lib/auth/session';
 	import { getAuthToken, getSessionUser, signOut as supabaseSignOut } from '$lib/auth/supabase';
 	import { newVisitId } from '$lib/visit';
-	import { emptyNoteMessage, hasSomethingToSend } from '$lib/engine/prompt-rules';
+	import { emptyNoteMessage, hasSomethingToSend, shouldDismissChat } from '$lib/engine/prompt-rules';
 	import { buildContext, buildTodayInfo, buildPriorPlan } from '$lib/engine/context';
 	import { computeStats } from '$lib/engine/stats';
 	import {
@@ -375,6 +375,21 @@ import CatVisit from '$lib/components/CatVisit.svelte';
 			plan = saved;
 			marks = {};
 			await refresh();
+
+			// Get out of the way once the new day is actually on the timeline.
+			//
+			// Asking for a change from inside the conversation is the ordinary way to use this app,
+			// and `intentHint` decides "shift my dinner to 9pm" is a planning request in code, before
+			// any model is asked. So this branch, not the handoff one above, is where a chat-submitted
+			// replan lands — which left the student staring at a dialog covering the plan she had just
+			// rewritten, with no way to tell it had happened. They had to close it themselves.
+			//
+			// Deliberately not model-driven. A `dismiss` flag would mean a prompt instruction, a schema
+			// field, and a new way to fail, all to be told something this function already knows: it
+			// is holding the saved plan. The rule itself is `shouldDismissChat`, which is tested,
+			// because this component is not.
+			if (shouldDismissChat({ chatOpen, planSaved: true })) closeChat();
+
 			if (result.usedTemplate) {
 				toast('planned in code. the model was unreachable', 'warn');
 			} else {
@@ -580,16 +595,6 @@ import CatVisit from '$lib/components/CatVisit.svelte';
 			<Composer busy={busy} onsubmit={submitNote} />
 
 
-		<ConversationDialog
-				open={chatOpen}
-				messages={sessionMessages}
-				pending={pendingChat}
-				{busy}
-				{waited}
-				onsubmit={submitChat}
-				onclose={closeChat}
-			/>
-
 			{#if todayCheckin && (todayCheckin.quick || todayCheckin.notes || todayCheckin.sleep_hours != null || todayCheckin.meals)}
 				<div class="{busy ? 'opacity-25 pointer-events-none' : ''} transition-opacity">
 					<MomRead checkin={todayCheckin} onflip={(slot) => void flipMeal(slot)} />
@@ -630,6 +635,22 @@ import CatVisit from '$lib/components/CatVisit.svelte';
 			<DayShape blocks={plan?.output.blocks ?? []} />
 		</aside>
 	</div>
+
+	<!--
+		Both dialogs sit out here at the top level of the page, never inside the grid above. Mounted
+		nested, the dimmer was cut off partway down the screen; at depth 0 — where the logout dialog
+		already lived — it covers the page. Nothing in the CSS explains the difference, so rather than
+		guess, every dialog in the app is mounted at depth 0 and shares one backdrop via `Modal`.
+	-->
+	<ConversationDialog
+		open={chatOpen}
+		messages={sessionMessages}
+		pending={pendingChat}
+		{busy}
+		{waited}
+		onsubmit={submitChat}
+		onclose={closeChat}
+	/>
 
 	<ConfirmDialog
 		open={askSignOut}

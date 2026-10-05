@@ -70,3 +70,26 @@ export function hasSomethingToSend(text: string, quick: string | null): boolean 
 export function emptyNoteMessage(): string {
 	return 'nothing to read, love. write something first, or pick rough/okay/great.';
 }
+
+/**
+ * Whether a turn that just wrote a new plan should close the conversation.
+ *
+ * Asking her to change the day from inside the chat is the ordinary way to use this app, and the
+ * mutation detector decides "shift my dinner to 9pm" is a planning request in code, before any model
+ * is asked. That means a chat-submitted replan arrives here as a plain plan save rather than as the
+ * conversational handoff, and the dialog used to stay open covering the day it had just rewritten.
+ *
+ * Two conditions, both deliberate:
+ *
+ * - `chatOpen`, so the composer path is untouched. Someone who never opened the conversation must not
+ *   have anything happen to it.
+ * - after the save, not before. A plan that failed to write leaves the dialog open with the error
+ *   showing, instead of dismissing into nothing.
+ *
+ * Named rather than inlined because the wiring that uses it lives in a Svelte component with no tests,
+ * and this is the rule that wiring is easy to break: the handoff branch closes the dialog too, so the
+ * two paths must keep agreeing about when.
+ */
+export function shouldDismissChat(input: { chatOpen: boolean; planSaved: boolean }): boolean {
+	return input.chatOpen && input.planSaved;
+}

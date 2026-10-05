@@ -127,7 +127,7 @@
 
 <svelte:head><title>Check in — Mom.exe</title></svelte:head>
 
-<div class="min-h-[80vh] grid place-items-center px-4 py-10">
+<div class="min-h-[80dvh] grid place-items-center px-4 py-10">
 	<div class="w-full max-w-md space-y-6">
 		<div class="text-center">
 			<h1 class="font-display text-5xl tracking-tighter uppercase" style="text-shadow: 4px 4px 0 var(--color-pink), 8px 8px 0 var(--color-blue)">
@@ -214,9 +214,9 @@
 		{/if}
 
 		<div class="text-center space-y-2">
-			<button type="button" class="text-sm font-black text-brown underline cursor-pointer" onclick={goLocal}>
+			<!-- <button type="button" class="text-sm font-black text-brown underline cursor-pointer" onclick={goLocal}>
 				or skip all this and use this browser directly
-			</button>
+			</button> -->
 			<p class="text-[11px] font-semibold text-mute leading-relaxed max-w-xs mx-auto">
 				Mom.exe is a wellness coach, not medical advice. hosted mode sends anonymized context to an
 				open-weight model; local mode keeps everything on your machine.

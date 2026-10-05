@@ -597,19 +597,32 @@ export function renderMoves(maxPerMove = 4): string {
 const VOCATIVE = "(?:[,.]?\\s*(?:beta|love|baby|child|ji)?[,.]?\\s*)?";
 
 const BANNED_OPENERS = [
-	new RegExp(`^i hear you${VOCATIVE}`, 'i'),
-	new RegExp(`^i hear you say${VOCATIVE}`, 'i'),
+	// The lookahead matters more than it looks: VOCATIVE can match empty, so without it this pattern
+	// happily fires on "you're wiped out" and returns "’re wiped out", having eaten the I out of the
+	// contraction. Both apostrophe forms are excluded, straight and curly.
+	new RegExp(`^i hear you(?![''’])${VOCATIVE}`, 'i'),
+	new RegExp(`^i hear you say(?![''’])${VOCATIVE}`, 'i'),
 	new RegExp(`^(?:i'?m )?sorry to hear (?:that|it)${VOCATIVE}`, 'i'),
-	// this one needs the clause in between: "as I see from our previous conversation, ..."
+	// these carry a whole clause of preamble with them, so they can only be cut at a comma or a
+	// full stop. The `[,.]` is required rather than optional because leaving the clause behind would
+	// strand a fragment — "feeling down about the midterms" on its own is not a reply.
 	new RegExp(`^as i (?:can )?(?:see|from)[^,.]{0,40}[,.]${VOCATIVE}`, 'i'),
-	// "i see you're feeling down" is the same register without the "as". a live run returned it to a
-	// student who had just failed an exam.
-	// these two carry the whole clause away with them: "I see you're feeling down about the
-	// midterms." is one sentence of preamble, and leaving "feeling down about the midterms" behind
-	// would be a fragment
+	// "I see you're feeling down about the midterms." is one sentence of preamble.
 	new RegExp(`^i see (?:that )?you(?:'re| are)\\s+[^,.!?]{0,48}[,.]\\s*${VOCATIVE}`, 'i'),
-	new RegExp(`^it (?:sounds|seems) like [^,.!?]{0,48}[,.]\\s*${VOCATIVE}`, 'i'),
-	new RegExp(`^(?:based on|according to) (?:our|the) (?:previous )?(?:conversation|discussion)${VOCATIVE}`, 'i')
+	new RegExp(`^(?:based on|according to) (?:our|the) (?:previous )?(?:conversation|discussion)${VOCATIVE}`, 'i'),
+
+	// These are cut at the phrase, not the clause, and that is a correction rather than a
+	// preference. They used to require a comma within 48 characters, which a live OpenRouter run
+	// defeated three times in a row: "It sounds like your mind is still buzzing from the day—give
+	// yourself a bit of quiet" has no comma at all, it has an em dash. The clause boundary these
+	// were guessing at is not reliably there.
+	//
+	// Removing just the connector leaves a sentence that is already complete — "It sounds like your
+	// mind is still buzzing" becomes "your mind is still buzzing" — which is her register anyway.
+	// Lower case is left alone throughout, because that is how she writes.
+	/^it (?:sounds|seems|reads|looks) like\s+/i,
+	/^(?:sounds|seems|looks) like\s+/i,
+	/^i hear you(?: say)?(?![''’])[,.]?\s+/i
 ];
 
 /**
@@ -635,7 +648,12 @@ export function polishAdvice(advice: string | null): string | null {
 	let out = advice.trim();
 	for (const re of BANNED_OPENERS) out = out.replace(re, '');
 	for (const re of BANNED_SIGN_OFFS) out = out.replace(re, '');
-	out = out.replace(/\s{2,}/g, ' ').replace(/^[,.\s]+/, '').trim();
+	// the em dash is here because "It sounds like — X" leaves one dangling at the front, and a reply
+	// that opens on a dash reads as a rendering fault
+	out = out
+		.replace(/\s{2,}/g, ' ')
+		.replace(/^[,.\s\u2014\u2013-]+/, '')
+		.trim();
 	// never hand back a fragment: if the cuts ate the sentence, the original is the safer answer
 	if (out.length < 8) return advice.trim();
 	if (!/[.!?)]$/.test(out)) out += '.';

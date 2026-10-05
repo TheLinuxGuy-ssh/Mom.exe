@@ -7,6 +7,7 @@ import { templatePlan } from '../src/lib/llm/template';
 import { nowMinutesInTz } from '../src/lib/engine/time';
 import { heuristicExtract, mergeUnderstanding } from '../src/lib/engine/extract';
 import type { Profile, Checkin } from '../src/lib/storage/types';
+import { supportsReasoningEffort } from '../src/lib/llm/capabilities';
 
 const NIM_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
 const MODEL = process.env.NIM_MODEL ?? 'openai/gpt-oss-20b';
@@ -53,7 +54,9 @@ async function callNim(
 			temperature,
 			top_p: 0.7,
 			max_tokens: 1200,
-			reasoning_effort: 'low',
+			// gated for the same reason as the app: this is an OpenAI/gpt-oss field, and Gemma has
+			// no such parameter
+			...(supportsReasoningEffort(MODEL) ? { reasoning_effort: 'low' } : {}),
 			stream: false
 		})
 	});

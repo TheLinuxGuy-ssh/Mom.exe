@@ -7,6 +7,7 @@
 	import type { Message, MessageRole } from '$lib/storage/types';
 	import { chatReady } from '$lib/engine/prompt-rules';
 	import { bubbleDelay, splitBubbles } from '$lib/engine/bubbles';
+	import Modal from './Modal.svelte';
 
 	let {
 		open = false,
@@ -162,18 +163,6 @@
 		if (open) scrollToEnd(true);
 	});
 
-	$effect(() => {
-		if (!open) return;
-		const onKey = (e: KeyboardEvent): void => {
-			// Escape is ignored while she is mid-reply. closing the dialog then left her bubbles to
-			// arrive into a view nobody was looking at, and the student reopened the app to find a
-			// conversation that appeared to have swallowed what they said
-			if (e.key === 'Escape' && !busy && !settling) onclose();
-		};
-		window.addEventListener('keydown', onKey);
-		return () => window.removeEventListener('keydown', onKey);
-	});
-
 	function scrollToEnd(force = false): void {
 		// wait for the new row to lay out before chasing it
 		requestAnimationFrame(() => {
@@ -222,25 +211,25 @@
 	}
 </script>
 
-{#if open}
+<!--
+	Modal owns the backdrop, the click-outside, the scroll lock and the fade. `dismissible` is false
+	while she is mid-reply, so Escape and a click on the backdrop both stop working at exactly that
+	moment — closing then left her bubbles arriving into a view nobody was looking at, and the
+	student came back to a conversation that looked like it had swallowed what they said.
+-->
+<Modal
+	{open}
+	onclose={onclose}
+	dismissible={!busy && !settling}
+	align="sheet"
+>
 	<div
-		class="fixed inset-0 z-50 flex items-end justify-center p-0 sm:items-center sm:p-6"
-		transition:fade={{ duration: 160 }}
-		onclick={(e) => {
-			// clicking the empty space around the conversation is the way out
-			if (e.target === e.currentTarget) onclose();
-		}}
-		role="presentation"
+		class="relative flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden border-2 border-ink bg-paper shadow-[8px_8px_0_var(--color-ink)] sm:rounded-2xl"
+		transition:lift={{ duration: 240 }}
+		role="dialog"
+		aria-modal="true"
+		aria-label="talking to mom"
 	>
-		<div class="absolute inset-0 bg-ink/55" role="presentation"></div>
-
-		<div
-			class="relative flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden border-2 border-ink bg-paper shadow-[8px_8px_0_var(--color-ink)] sm:rounded-2xl"
-			transition:lift={{ duration: 240 }}
-			role="dialog"
-			aria-modal="true"
-			aria-label="talking to mom"
-		>
 			<header class="flex items-center justify-between gap-3 border-b-2 border-ink px-4 py-3">
 				<div class="flex items-center gap-2 text-brown">
 					<span class="text-xs font-black uppercase tracking-[0.18em]">talking to mom</span>
@@ -312,6 +301,5 @@
 					</button>
 				</div>
 			</footer>
-		</div>
 	</div>
-{/if}
+</Modal>

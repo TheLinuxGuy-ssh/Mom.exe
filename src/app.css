@@ -28,7 +28,13 @@ body {
 		radial-gradient(circle at 85% 8%, rgba(96, 215, 255, 0.22), transparent 24rem),
 		radial-gradient(circle at 55% 85%, rgba(199, 255, 77, 0.18), transparent 28rem),
 		var(--color-cream);
-	min-height: 100vh;
+	/*
+	 * dvh, not vh. `100vh` is the *tall* viewport — the height the page would have with the mobile
+	 * URL bar hidden — so on a phone it is taller than what is actually visible, and anything sized
+	 * against it runs off the bottom of the screen. dvh tracks the real visible area as the bar
+	 * shows and hides, which is what "fill the page" actually means on a phone.
+	 */
+	min-height: 100dvh;
 	overflow-x: hidden;
 }
 

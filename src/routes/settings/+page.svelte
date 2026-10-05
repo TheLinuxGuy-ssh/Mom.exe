@@ -209,36 +209,41 @@
 		</div>
 	</section>
 
-	<ConfirmDialog
-		open={askSeed !== null}
-		title="overwrite your data?"
-		confirmLabel="overwrite"
-		busy={seeding !== null}
-		onconfirm={() => {
-			if (askSeed !== null) void loadPersona(askSeed);
-		}}
-		oncancel={() => (askSeed = null)}
-	>
-		Loading <strong>{PERSONAS.find((p) => p.key === askSeed)?.label ?? 'this persona'}</strong> replaces this
-		account's check-ins and profile with synthetic demo history. Anything you tracked here is
-		gone for good.
-	</ConfirmDialog>
-
-	<ConfirmDialog
-		open={askWipe}
-		title="wipe everything?"
-		tone="danger"
-		confirmLabel="wipe it all"
-		busy={wiping}
-		onconfirm={() => void deleteAll()}
-		oncancel={() => (askWipe = false)}
-	>
-		This deletes every check-in and plan on this account and sends you back to setup. There is no
-		undo, so export your data first if you want a copy.
-	</ConfirmDialog>
-
 	<p class="text-[11px] font-semibold text-mute text-center leading-relaxed max-w-md mx-auto">
 		Mom.exe is a wellness coach, not medical advice. anonymized context (no name, email or birth date) is
 		sent to an open-weight model. MIT licensed.
 	</p>
 </div>
+
+<!--
+	Mounted at the top level of the page rather than inside the container above. Nested one level
+	deep, this dimmer was cut off partway down the screen. They render nothing while closed, so
+	sitting them out here costs nothing and keeps every dialog in the app on the same footing.
+-->
+<ConfirmDialog
+	open={askSeed !== null}
+	title="overwrite your data?"
+	confirmLabel="overwrite"
+	busy={seeding !== null}
+	onconfirm={() => {
+		if (askSeed !== null) void loadPersona(askSeed);
+	}}
+	oncancel={() => (askSeed = null)}
+>
+	Loading <strong>{PERSONAS.find((p) => p.key === askSeed)?.label ?? 'this persona'}</strong> replaces this
+	account's check-ins and profile with synthetic demo history. Anything you tracked here is
+	gone for good.
+</ConfirmDialog>
+
+<ConfirmDialog
+	open={askWipe}
+	title="wipe everything?"
+	tone="danger"
+	confirmLabel="wipe it all"
+	busy={wiping}
+	onconfirm={() => void deleteAll()}
+	oncancel={() => (askWipe = false)}
+>
+	This deletes every check-in and plan on this account and sends you back to setup. There is no
+	undo, so export your data first if you want a copy.
+</ConfirmDialog>

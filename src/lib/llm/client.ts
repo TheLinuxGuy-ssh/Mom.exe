@@ -1,4 +1,5 @@
 import type { LLMConfig } from './config';
+import { supportsReasoningEffort } from './capabilities';
 
 export interface ChatMessage {
 	role: string;
@@ -72,7 +73,21 @@ export async function chat(
 		max_tokens: opts.maxTokens ?? config.maxTokens ?? 1200,
 		stream: false
 	};
-	if (config.reasoningEffort && config.reasoningEffort !== 'medium') {
+	// Two conditions, both load-bearing.
+	//
+	// 'medium' is skipped on purpose: at that setting gpt-oss spends the entire token budget on
+	// reasoning and returns no content (41s, finish_reason: length), which reads in the app as the
+	// model being unreachable.
+	//
+	// And it is only sent to models that actually have the field. It is an OpenAI/gpt-oss extension;
+	// Gemma has no such parameter, and an unsupported one is ignored at best and rejected at worst.
+	// A rejection is invisible here — it reaches the student as "could not reach the model" on every
+	// note, with a generic plan in place of the one they asked for.
+	if (
+		supportsReasoningEffort(config.model) &&
+		config.reasoningEffort &&
+		config.reasoningEffort !== 'medium'
+	) {
 		reqBody['reasoning_effort'] = config.reasoningEffort;
 	}
 

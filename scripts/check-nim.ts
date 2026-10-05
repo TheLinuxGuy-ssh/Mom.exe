@@ -20,6 +20,19 @@ const KEY = env.NIM_API_KEY;
 const MODEL = env.NIM_MODEL ?? env.VITE_NIM_MODEL ?? 'openai/gpt-oss-20b';
 const URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
 
+/**
+ * Order matters: whatever VITE_NIM_MODEL is set to is tried first, so a deliberate switch needs no
+ * edit here, and the rest are fallbacks if it is retired. Asking the provider what is actually live
+ * beats trusting a list that was correct last week.
+ *
+ * Gemma was evaluated against this and is deliberately absent. `google/gemma-3-27b-it` and
+ * `google/gemma-2-2b-it` return 410, retired; `google/gemma-3-12b-it`, `google/gemma-3-4b-it`,
+ * `google/gemma-2-9b-it` and the Gemma 4 ids return 404 or hang. NVIDIA is not serving this account a
+ * Gemma model, and local inference is not an option either: gemma-3-27b needs roughly 16GB and the
+ * machine has no GPU and 7GB of RAM, so the 4B variant would run at a few tokens a second and put a
+ * minute on every note. They are listed in the README rather than here, because a probe list full of
+ * dead ids is just noise to read past.
+ */
 const CANDIDATES = [
 	MODEL,
 	'openai/gpt-oss-20b',

@@ -51,6 +51,17 @@ const BodySchema = z.object({
 
 const NIM_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
 
+/**
+ * Whether this model accepts OpenAI-style `reasoning_effort`.
+ *
+ * A deliberate copy of `src/lib/llm/capabilities.ts`, which cannot be imported here because this
+ * function runs on Deno with no access to the app's source tree. Kept tiny and obviously equivalent
+ * for that reason: when it changes, change it in both places.
+ */
+function supportsReasoningEffort(model: string): boolean {
+	return /^openai\/(?:gpt-oss|o[134])/i.test((model ?? '').trim());
+}
+
 Deno.serve(async (req) => {
 	if (req.method === 'OPTIONS') {
 		return new Response('ok', { headers: corsHeaders });
@@ -104,7 +115,14 @@ Deno.serve(async (req) => {
 			top_p: 0.7,
 			max_tokens: max_tokens ?? 1200,
 			stream: false,
-			...(reasoning_effort && reasoning_effort !== 'medium' ? { reasoning_effort } : {})
+			// Only for models that have the field. It is an OpenAI/gpt-oss extension; Gemma has no
+			// such parameter, and sending an unsupported one is rejected at worst. A rejection here
+			// comes back as a 502 to the browser, which the app reports as "could not reach the
+			// model" on every note — so the gate lives here as well as in the client, because this
+			// function is the only thing that actually talks to the provider in hosted mode.
+			...(supportsReasoningEffort(model) && reasoning_effort && reasoning_effort !== 'medium'
+				? { reasoning_effort }
+				: {})
 		})
 	});
 

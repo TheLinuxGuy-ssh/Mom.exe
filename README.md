@@ -22,7 +22,7 @@
 </p>
 
 <p>
-  <a href="https://mom-exe.vercel.app">Live demo</a> ·
+  <a href="https://momexe.vercel.app">Live demo</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="#deploy-to-vercel">Deploy to Vercel</a> ·
@@ -118,7 +118,7 @@ NIM_API_KEY=
 | `npm run build` | Static production build through `adapter-static`. |
 | `npm run preview` | Serves the production build locally. |
 | `npm run check` | Runs `svelte-check` across the project. Zero errors expected. |
-| `npm test` | Vitest suite, currently 421 tests. |
+| `npm test` | Vitest suite, currently 472 tests. |
 | `npm run eval` | Four synthetic personas through the live pipeline, reporting schema validity, no medical claims, no shame, and latency. |
 | `npm run check-nim` | Probes NVIDIA NIM and prints `LIVE`, `EOL`, or `NOPE` per model id. |
 | `npm run test:student` | Thirty-two first person student exchanges through the real pipeline, checking intent routing, the plan contract, and her voice. Without a key it exercises the fallback path and says so instead of scoring failures. |
@@ -168,6 +168,24 @@ The link path needs no code: the user taps it on the same device, lands back on 
 > Local inference through a custom OpenAI compatible endpoint (Ollama, for example) is still supported by the client, but it is not exposed in the settings UI right now, because the mode was pinned to hosted to keep the interface simple.
 
 </details>
+
+## Model choice, and what was ruled out
+
+This runs `openai/gpt-oss-20b` on NVIDIA NIM, and that was a decision rather than a default. The
+alternatives were measured or ruled out rather than assumed:
+
+- **Gemma, evaluated and unavailable.** The cheapest route to the Gemma prize category was to serve a
+  Gemma model instead, so that was tried. NVIDIA is not serving this project a Gemma: `gemma-3-27b-it`
+  and `gemma-2-2b-it` return `410`, retired; `gemma-3-12b-it`, `gemma-3-4b-it`, `gemma-2-9b-it` and the
+  Gemma 4 ids return `404` or hang. Local inference is not a substitute either — gemma-3-27b wants
+  about 16GB and the machine this was built on has no GPU and 7GB of RAM, so the 4B variant would
+  manage a few tokens a second and add a minute to every note.
+- **OpenRouter, tried and reverted.** Same model, cheaper plumbing, and the migration found a real
+  bug: `reasoning_effort` is an OpenAI/gpt-oss field that OpenRouter does not accept, and sending it
+  fails every request in a way that surfaces to the user as "could not reach the model". That failure
+  prompted `src/lib/llm/capabilities.ts`, which is why the request shape is now model-aware.
+- **Gemma is still one env var away** if NVIDIA serves it again: set `VITE_NIM_MODEL` and run
+  `npm run check-nim`. The reasoning-parameter gate already exists to make that safe.
 
 ## Configuration
 
@@ -292,7 +310,7 @@ Set these as Vercel environment variables for both Preview and Production, then 
 
 `NIM_API_KEY` must **not** be a Vercel build variable. Only `VITE_*` variables reach the browser, and the key is read only by the Supabase edge function.
 
-Two post deploy chores: set your real domain in `src/app.html`, `static/robots.txt`, and `static/sitemap.xml`, since `mom-exe.vercel.app` is currently a placeholder. Then upload `static/og-image.png` under repo Settings then Social preview.
+Two post deploy chores: set your real domain in `src/app.html`, `static/robots.txt`, and `static/sitemap.xml`, since `momexe.vercel.app` is currently a placeholder. Then upload `static/og-image.png` under repo Settings then Social preview.
 
 ## Troubleshooting
 
@@ -326,22 +344,35 @@ This prints `LIVE`, `EOL`, or `NOPE` per id. As of writing, `openai/gpt-oss-20b`
 <details>
 <summary>Measured behaviour</summary>
 
-Measured with a live `NIM_API_KEY` against `openai/gpt-oss-20b`, using this repo's own harnesses.
+All numbers below are from live runs against `openai/gpt-oss-20b` on NVIDIA NIM, in the configuration
+this repo ships. They are ranges across repeated runs, not a best run, because the honest answer is
+that this model is inconsistent and the numbers move.
 
 | Metric | Value |
 | --- | --- |
-| Intent routing, `npm run test:student` | 32/32, repeatably, across a scripted first-year hostel student |
-| Turns needing the code planner or a recovery path | 2 to 4 of 32, varying by run |
-| Voice, shame and service-desk checks | 0 failures across the final run |
-| Note understanding field accuracy (10 notes, 2 runs) | 22/22 |
-| Plan validity across 4 synthetic personas | 8/8 first shot, 8/8 after one repair retry |
-| Latency, one combined call | 7 to 17s |
+| Intent routing, `npm run test:student` | 29 to 32 of 32 across repeated runs |
+| Turns needing the code planner or a recovery path | 1 to 10 of 32, depending on provider load |
+| Voice, shame and service-desk checks | 0 failures on the best run, 1 to 5 on the worst |
+| Plan validity across 4 synthetic personas, `npm run eval` | **5 of 8 first shot, 5 of 8 after repair** |
+| No medical claims / no scorekeeper language | 8/8 on every run |
+| Latency, one combined call | 7 to 31s |
 | Model output length | around 2.3k characters |
 
-Those two lines together are the honest summary: routing is settled, and the remaining failures are
-transport, not judgement. A run or two will lose a turn to a 45 second timeout or a malformed
-envelope, and the app recovers rather than showing a generic plan. Before this pass that number was
-7 to 9.
+**The plan-validity number is the one to read honestly.** An earlier version of this file claimed
+8/8 and that was true when it was written; re-measured against the current prompt and the current
+provider it is 5/8, and the repair retry is not recovering the difference — it re-asks the model with
+a skeleton and the model produces something else invalid just as often. Roughly one note in four ends
+up handled by the deterministic planner instead.
+
+That is a real limitation of an open 21B model being asked for a strict JSON envelope, and it is why
+`templatePlan` exists and is not a toy: when the model's plan cannot be trusted, a day written in code
+is a better answer than no day at all. Closing the gap properly is future work — schema-constrained
+decoding is the obvious route, since it would remove the possibility of invalid output rather than
+detect it afterwards.
+
+Routing being stable while plan validity is not is the expected shape of the problem: deciding
+*whether* to plan is a classification the model is good at, and emitting a *valid* plan is a
+formatting task it is mediocre at.
 
 Latency is inherent to reasoning models on a long context, and it is why `reasoning_effort` matters.
 At the default medium or high, the same call burned the entire token budget on reasoning and
@@ -396,7 +427,7 @@ that decides what she "meant" is the kind of thing that quietly ruins everything
 
 Link previews read tags from `src/app.html` and never run JavaScript, so the Open Graph and Twitter Card tags live there rather than in `svelte:head`.
 
-- Replace every `https://mom-exe.vercel.app` in `src/app.html` with your real URL, covering canonical, `og:url`, `og:image`, and `twitter:image`.
+- Replace every `https://momexe.vercel.app` in `src/app.html` with your real URL, covering canonical, `og:url`, `og:image`, and `twitter:image`.
 - `static/og-image.svg` is the thumbnail source of truth at 1200x630. Edit it, then run `npm run og` to regenerate the PNG, since crawlers render the PNG.
 - `static/favicon.svg` is the logo, the wobbling mug, also used as the apple touch icon. Replace it freely.
 - Update the domain in `static/robots.txt` and `static/sitemap.xml`.

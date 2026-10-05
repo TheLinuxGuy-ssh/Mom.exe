@@ -89,7 +89,7 @@
 
 <svelte:head><title>Setup — Mom.exe</title></svelte:head>
 
-<div class="min-h-[80vh] px-4 py-10">
+<div class="min-h-[80dvh] px-4 py-10">
 	<div class="w-full max-w-lg mx-auto space-y-6">
 		<div class="flex items-center justify-center gap-1.5">
 			{#each STEPS as s, i}

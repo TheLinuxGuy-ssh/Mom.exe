@@ -218,13 +218,13 @@ describe('polishing the reply', () => {
 		expect(polishAdvice("i see you're feeling down about the midterms. give yourself a night.")).toBe(
 			'give yourself a night.'
 		);
-		// here the cut would leave "sleep." alone, which is too terse to be her, so the original
-		// stands. returning a fragment would be worse than leaving a banned opener in place
+		// cutting only the connector leaves a complete sentence, so this no longer needs the
+		// fragment guard to save it the way the clause-consuming version did
 		expect(polishAdvice("it sounds like you're at your limit. sleep. ")).toBe(
-			"it sounds like you're at your limit. sleep."
+			"you're at your limit. sleep."
 		);
 		expect(polishAdvice('it sounds like this is rough. eat something and rest.')).toBe(
-			'eat something and rest.'
+			'this is rough. eat something and rest.'
 		);
 	});
 
@@ -236,6 +236,49 @@ describe('polishing the reply', () => {
 			'eat something now.'
 		);
 		expect(polishAdvice('sleep by 11. i hope this helps!')).toBe('sleep by 11.');
+	});
+
+	/**
+	 * A live OpenRouter run produced all three of these. The old pattern needed a comma within 48
+	 * characters of the connector, and none of them has one there — the third uses an em dash. The
+	 * clause boundary it was guessing at is not reliably there, so only the connector is removed now,
+	 * which leaves a sentence that already stands on its own.
+	 */
+	it('cuts the connector off even when there is no clause boundary to find', () => {
+		expect(
+			polishAdvice('It sounds like the extra time in the seminar really threw off your focus, start small.')
+		).toBe('the extra time in the seminar really threw off your focus, start small.');
+		expect(
+			polishAdvice('It sounds like you got caught up with friends and missed your hydration. Do better.')
+		).toBe('you got caught up with friends and missed your hydration. Do better.');
+		expect(
+			polishAdvice('It sounds like your mind is still buzzing from the day—give yourself a quiet night.')
+		).toBe('your mind is still buzzing from the day—give yourself a quiet night.');
+		expect(polishAdvice('Sounds like a rough one. Eat something.')).toBe('a rough one. Eat something.');
+		expect(polishAdvice('Seems like a lot. Get some rest.')).toBe('a lot. Get some rest.');
+	});
+
+	/**
+	 * Two bugs this file caught the hard way, both from real replies rather than invented ones.
+	 *
+	 * "I hear you" used to match the front of "you're wiped out" and return "’re wiped out",
+	 * because the vocative group can match nothing at all and nothing stopped it from firing on the
+	 * contraction. Then a reply that opened on an em dash was left with the dash hanging there.
+	 */
+	it('never eats the I out of a contraction', () => {
+		expect(polishAdvice("I hear you're wiped out today—sounds exhausting. Rest.")).toBe(
+			"I hear you're wiped out today—sounds exhausting. Rest."
+		);
+		expect(polishAdvice("You're feeling wiped out today—sounds exhausting.")).toBe(
+			"You're feeling wiped out today—sounds exhausting."
+		);
+		expect(polishAdvice('You are wiped out today. Rest.')).toBe('You are wiped out today. Rest.');
+	});
+
+	it('takes a dangling dash off the front', () => {
+		expect(polishAdvice('It sounds like — missing home and hostel food is rough. Call home.')).toBe(
+			'missing home and hostel food is rough. Call home.'
+		);
 	});
 
 	it('leaves her alone when there is nothing to cut', () => {
