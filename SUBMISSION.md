@@ -93,14 +93,28 @@ I re-measured before writing this, and I am not going to quote numbers I got on 
 
 | Metric | Result |
 | --- | --- |
-| Intent routing (32 scripted exchanges) | 29–32 of 32, varying by provider load |
-| Plan validity (4 synthetic personas) | **5 of 8, and the repair retry does not fix it** |
+| Intent routing (32 scripted exchanges) | 30–32 of 32, varying by provider load |
+| Plan validity, first shot (4 personas × 2 runs) | **6 of 8** |
+| Plan validity after one repair retry — what the app actually does | **8 of 8** |
 | No medical claims / no scorekeeper language | 8 of 8 |
-| Latency | 7–31s |
+| Latency | 9–35s |
 
-An earlier draft of my README claimed 8/8 plan validity. Re-measured honestly it is 5/8, and roughly
-one note in four is handled by the code planner instead of the model. That is a real limitation of an
-open 21B model asked for a strict envelope, and no amount of prompt wording closed it.
+Two of those numbers changed because I found the measurement itself was broken, and I think that is
+the more useful finding than either number.
+
+`npm run eval` was reading `process.env.NIM_API_KEY` but never loaded `.env`, so it silently measured
+the *template planner* and printed a confident "8/8 valid." The model was never called. A green number
+that measures nothing is worse than a red one, because it stops you looking. Fixed, and the script now
+says loudly when no key was found and that it is measuring the fallback rather than the model.
+
+With that fixed, the honest picture is: the first shot is right 6 times in 8, and the repair retry
+recovers the other 2, so the user always gets a real plan from the model. Latency is the genuinely bad
+number — 9 to 35 seconds, because this is a reasoning model on a 35k-character prompt. That bimodal
+tail is what the timeout bug was: I had 30 seconds configured, the slowest call I could measure took
+21, and every call in the tail was being thrown away while the model was answering perfectly well.
+
+The remaining first-shot failures are a real limitation of an open 21B model asked for a strict
+envelope, and no amount of prompt wording closed them.
 
 So the code planner stopped being a nice-to-have and became the honest fallback: when the model's plan
 cannot be trusted, a day written in code is a better answer than no day. Schema-constrained decoding

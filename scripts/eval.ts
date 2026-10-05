@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { PERSONAS } from '../dev-fixtures/personas';
 import { buildContext, buildTodayInfo } from '../src/lib/engine/context';
 import { computeStats } from '../src/lib/engine/stats';
@@ -38,6 +39,30 @@ const NOTES: { text: string; expect: { sleep_hours?: number; slept_at?: string; 
 		expect: { sleep_hours: 7, quick: 'okay' }
 	}
 ];
+
+/**
+ * Read the provider key out of `.env`.
+ *
+ * Without this the script silently measures the *template planner* instead of the model and prints a
+ * confident 8/8 that means nothing. `student-test.ts` has always loaded the key; this one did not,
+ * which made it the most misleading script in the project — it looked like the model passing a test
+ * the model never ran.
+ */
+function loadKey(): void {
+	for (const f of ['.env', '.env.local']) {
+		try {
+			const raw = readFileSync(f, 'utf8');
+			for (const line of raw.split('\n')) {
+				const m = /^(NIM_API_KEY|NIM_MODEL)=(.+)$/.exec(line.trim());
+				if (m && !process.env[m[1]!]) process.env[m[1]!] = m[2];
+			}
+		} catch {
+			continue;
+		}
+	}
+}
+
+loadKey();
 
 async function callNim(
 	messages: { role: string; content: string }[],
@@ -162,7 +187,12 @@ async function evalPlans(): Promise<void> {
 	}
 
 	console.log('\n== PLAN GENERATION ==');
-	console.log(`model: ${withModel ? MODEL : 'template fallback'}`);
+	if (withModel) {
+		console.log(`model: ${MODEL} (live)`);
+	} else {
+		console.log('model: NONE — no NIM_API_KEY found, so every row below is the TEMPLATE planner.');
+		console.log('This measures the fallback, not the model. Not a model result.');
+	}
 	console.log('| persona | run | first shot | after retry | no medical | no shame | ms | summary |');
 	console.log('|---|---|---|---|---|---|---|---|');
 	for (const r of rows) {

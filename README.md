@@ -114,7 +114,7 @@ NIM_API_KEY=
 | `npm run build` | Static production build through `adapter-static`. |
 | `npm run preview` | Serves the production build locally. |
 | `npm run check` | Runs `svelte-check` across the project. Zero errors expected. |
-| `npm test` | Vitest suite, currently 472 tests. |
+| `npm test` | Vitest suite, currently 469 tests. |
 | `npm run eval` | Four synthetic personas through the live pipeline, reporting schema validity, no medical claims, no shame, and latency. |
 | `npm run check-nim` | Probes NVIDIA NIM and prints `LIVE`, `EOL`, or `NOPE` per model id. |
 | `npm run test:student` | Thirty-two first person student exchanges through the real pipeline, checking intent routing, the plan contract, and her voice. Without a key it exercises the fallback path and says so instead of scoring failures. |
@@ -346,29 +346,34 @@ that this model is inconsistent and the numbers move.
 
 | Metric | Value |
 | --- | --- |
-| Intent routing, `npm run test:student` | 29 to 32 of 32 across repeated runs |
-| Turns needing the code planner or a recovery path | 1 to 10 of 32, depending on provider load |
-| Voice, shame and service-desk checks | 0 failures on the best run, 1 to 5 on the worst |
-| Plan validity across 4 synthetic personas, `npm run eval` | **5 of 8 first shot, 5 of 8 after repair** |
-| No medical claims / no scorekeeper language | 8/8 on every run |
-| Latency, one combined call | 7 to 31s |
+| Intent routing, `npm run test:student` | 30 to 32 of 32 across repeated runs |
+| Turns needing the code planner or a recovery path | 0 to 5 of 32, depending on provider load |
+| Plan validity, first shot, `npm run eval` | **6 of 8** |
+| Plan validity after one repair retry — what the app does | **8 of 8** |
+| No medical claims / no scorekeeper language | 8 of 8 on every run |
+| Latency, one combined call | 9 to 35s |
 | Model output length | around 2.3k characters |
 
-**The plan-validity number is the one to read honestly.** An earlier version of this file claimed
-8/8 and that was true when it was written; re-measured against the current prompt and the current
-provider it is 5/8, and the repair retry is not recovering the difference — it re-asks the model with
-a skeleton and the model produces something else invalid just as often. Roughly one note in four ends
-up handled by the deterministic planner instead.
+**A warning about measuring this yourself.** `npm run eval` reads `NIM_API_KEY` from `.env` and prints
+"model: NONE" if it cannot find it, because before that fix it silently measured the *template
+planner* and reported a confident 8/8 that the model had nothing to do with. A green number that
+measures nothing is worse than a red one, because it stops you looking. Check the `model:` line before
+believing anything else in this table.
 
-That is a real limitation of an open 21B model being asked for a strict JSON envelope, and it is why
-`templatePlan` exists and is not a toy: when the model's plan cannot be trusted, a day written in code
-is a better answer than no day at all. Closing the gap properly is future work — schema-constrained
-decoding is the obvious route, since it would remove the possibility of invalid output rather than
-detect it afterwards.
+**Read the plan-validity row as two numbers, not one.** The first shot is valid 6 times in 8. The
+repair retry recovers the other 2, so the user always ends up with a real plan from the model rather
+than the code planner. Both numbers are live; if you see 5/8 *after* repair, something has regressed.
 
-Routing being stable while plan validity is not is the expected shape of the problem: deciding
-*whether* to plan is a classification the model is good at, and emitting a *valid* plan is a
-formatting task it is mediocre at.
+Latency is the genuinely weak number: 9 to 35 seconds, because this is a reasoning model working
+through a 35k-character prompt. That bimodal spread is also the most instructive bug of the project —
+the timeout was originally 30 seconds, the slowest call I could measure took 21, and so every call in
+the slow tail was discarded as "could not reach the model" while the model was answering perfectly
+well. Neither the router nor the model was broken. The budget was.
+
+Closing the first-shot gap properly is future work, and schema-constrained decoding is the obvious
+route: it would remove the possibility of invalid output rather than detect it afterwards. Until then
+`templatePlan` is what makes the failure survivable, and it is not a toy — it writes a real day from
+sleep targets, mess windows and actual sleep debt.
 
 Latency is inherent to reasoning models on a long context, and it is why `reasoning_effort` matters.
 At the default medium or high, the same call burned the entire token budget on reasoning and
