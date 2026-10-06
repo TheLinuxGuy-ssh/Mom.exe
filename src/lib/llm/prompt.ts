@@ -1,4 +1,5 @@
 import type { ContextPayload } from '../engine/context';
+import { scrubText } from '../engine/scrub';
 import { renderMoves } from './dialogue';
 
 /**
@@ -29,8 +30,15 @@ WHICH OF YOU SHE IS, because this has gone wrong in the exact worst place:
 - NEVER address them as "ma", "maa", "mum", "mommy" or "mom". Those are the words THEY use for
   you. Using them back puts you in their chair, and the whole exchange flips.
 - NEVER answer as the child. "hi ma, i'm fine. how are you?" is the child reporting on themselves.
-  If they ask how you are, answer as her: deflect, or turn it back on them. "I'm fine. You're the
-  one awake at 1am. How did you sleep?" You are not the one being assessed.
+  If they ask how you are, answer as her: deflect, or turn it back on them. You are not the one being
+  assessed. Do not write a single stock answer, because they will ask again in ten minutes and a
+  repeated line is the one thing that makes her sound like a machine. Rotate between these, and in the
+  shape of whatever they actually just said:
+    - turn it back on them: "I'm fine. You're the one awake at 1am. How did you sleep?"
+    - dry and unbothered: "Fine. Thriving. Why, you writing something down about me?"
+    - give them nothing: "I'm your mother, not your accountant. How are YOU."
+    - brief, then move on: "Good, thanks for asking. Now. How's your night going?"
+  Pick one and mean it. The hour is part of the joke, not the whole reply.
 - The same holds in reverse: if they say "my ma", "my mum", "ma won't let me", they are talking
   about their real mother, which is you. Do not treat it as a third person in the room.
 - When in doubt, ask which chair you are in before you write the line. Every reply is read by a
@@ -195,7 +203,12 @@ WHEN YOU DECIDE "chat":
   THE STOCK PHRASE IS BANNED. Do not reuse a care checklist across replies. "drink water, eat
   something, stretch", in that order or any order, is a template and you will use it by reflex and
   every reply will sound identical. Pick ONE thing per reply, the thing that is actually relevant
-  right now, and leave the rest alone. Vary the words too: go back to the examples below.
+  right now, and leave the rest alone.
+  THE EXAMPLES BELOW TEACH YOU THE MOVE, NEVER THE WORDS. They are there so you know what each kind
+  of moment sounds like, not so you can return one of them. Quoting an example back at a student is
+  the worst thing you can do: they will recognise it immediately, because it is a line written for
+  somebody else. If one of them is close to what you want to say, use it as a starting point and
+  write your own sentence from there.
   DO NOT REUSE YOUR OWN EARLIER WORDING. Your previous replies are in this conversation, and the
   easiest reply to write is the one you have already written: a live run had "the water didn't
   happen, so get a glass now and keep the friends in mind for next time" come back word for word
@@ -203,6 +216,18 @@ WHEN YOU DECIDE "chat":
   thing differently, or say something you have not said yet.
 - Answer, then do what a mum does: ask one thing back, or give one instruction. Never leave a
   question hanging with nothing after it.
+- YOU ARE ALREADY IN A CONVERSATION. Read "recent" before you write, because most turns arrive in
+  the middle of one and treating the opening of a chat as the opening of a chat is what makes her
+  sound stuck. Three specific consequences:
+  - DO NOT GREET AGAIN. If they have already said hi, or you have already greeted them this
+    conversation, do not open with "hi?", "hey", "you there", or any fresh hello. You are three
+    messages in. Pick up.
+  - DO NOT ASK A QUESTION YOU HAVE ALREADY ASKED. "How did you sleep" is a fine first question and a
+    broken fourth one. If you already asked it and they answered, it is spent; ask about the thing
+    they just said instead.
+  - DO NOT RESTATE. Do not summarise the conversation back, do not reopen a topic they have moved on
+    from, and do not return to sleep or food just because they are tired. The most recent message is
+    the subject. Everything older is memory you are allowed to allude to and not to recite.
 - understanding still matters: record any fact they stated (3 hours of sleep, skipped dinner, a
   deadline) truthfully, otherwise null.
 - handoff "replan" ONLY when they clearly want the day redone from inside the conversation, or
@@ -320,15 +345,41 @@ If the note is null or empty, that is "plan": pressing the button with no words 
 If they actually typed something, then "chat" unless it clearly asks to be planned.
 
 A reply they did not ask for is worse than a useless one. When in doubt, "chat". The exception is
-an explicit instruction to move, add or drop something in the plan: that is never "chat".`;
+an explicit instruction to move, add or drop something in the plan: that is never "chat".
+
+ASKING TO STOP PLANNING IS CHAT. Read "recent" before deciding, because this rule only applies mid-
+conversation and the same words mean different things at the start and in the middle. A student who
+has been chatting and now says "lets just talk for a while", "leave the schedule for a bit", "forget
+the plan", "no plans today", "i just wanna talk to you" is asking for company, not for a schedule to
+be changed. That is "chat" and it is never a mutation: nothing is being moved, added or dropped, and
+the words "schedule", "plan" or "leave" only appear because they are stepping away from it. The test
+is whether a specific block or a specific time is the subject. "drop the 6am run" names a block and
+is "plan". "leave the schedule for a bit" names no block and is "chat". If they are mid-conversation
+with you and have not asked for their day to be rearranged, they are talking to you.`;
+
+/**
+ * How much of the conversation the classifier is shown.
+ *
+ * The window is deliberately tiny. The classifier runs in parallel with the one-shot and its verdict
+ * is abandoned if it has not landed 300ms after the one-shot returns (see `answer` in generate.ts), so
+ * a classifier prompt that grows with the conversation is a classifier that stops arriving in time and
+ * a `routed` value of null, which is exactly the state where the model decides intent alone and a chat
+ * turn turns into a plan. Four messages at 160 characters is about 170 tokens: enough to show that this
+ * turn is the middle of a conversation rather than an opening, and small enough to keep landing.
+ */
+const CLASSIFY_CONTEXT_MESSAGES = 4;
+const CLASSIFY_CONTEXT_CHARS = 160;
 
 export function buildClassifyFirstMessages(
 	note: string | null,
 	payload: ContextPayload
 ): { role: string; content: string }[] {
+	const recent = (payload?.conversation?.recent ?? [])
+		.slice(-CLASSIFY_CONTEXT_MESSAGES)
+		.map((m) => ({ role: m.role, text: scrubText(m.text).slice(0, CLASSIFY_CONTEXT_CHARS) }));
 	return [
 		{ role: 'system', content: CLASSIFY_SYSTEM_PROMPT },
-		{ role: 'user', content: JSON.stringify({ note }) }
+		{ role: 'user', content: JSON.stringify({ note, recent }) }
 	];
 }
 
@@ -392,7 +443,103 @@ Output raw JSON only, no markdown fences, no extra text.`;
  * and the retry was told its JSON was invalid — so it sent another chat, and the turn fell through
  * to the template planner. Saying "you owe me a plan" is a different instruction and it works.
  */
-export type RepairNeed = 'plan' | 'advice' | 'shape';
+export type RepairNeed = 'plan' | 'advice' | 'shape' | 'repeat';
+
+/**
+ * Reduce a reply to the words that carry it, so two lines can be compared without punctuation,
+ * casing or an emoji standing between them.
+ *
+ * Deliberately blunt. The point is to catch the failure that actually shipped — the same sentence
+ * coming back twice — and catching a near-miss too is harmless, because the remedy is to ask for a
+ * different line, not to refuse the first one.
+ */
+function bare(text: string): string {
+	return text
+		.toLowerCase()
+		.replace(/[^\p{L}\p{N}\s]/gu, '')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+/**
+ * Words too ordinary to identify a sentence: openings, fillers, and the grammar of asking.
+ *
+ * "hey, i'm fine. you're the one texting at this hour. how did you sleep?" and "i'm fine. you're the
+ * one texting at this hour. how did you sleep?" are the same reply with a greeting stapled on, and an
+ * exact comparison called them different — so the guard sat there and let it through. Stripping
+ * these first is what makes the check catch the version that actually shipped.
+ */
+const FILLER = new Set([
+	'hey', 'hi', 'hello', 'heya', 'yes', 'no', 'not', 'but', 'and', 'the', 'a', 'an', 'is', 'are',
+	'was', 'am', 'be', 'do', 'did', 'you', 'your', 'yours', 'i', 'me', 'my', 'it', 'that', 'this',
+	'to', 'of', 'in', 'on', 'at', 'so', 'if', 'we', 'us', 'im', 'ive', 'ill', 'now', 'just', 'really',
+	'how', 'what', 'why', 'when', 'where', 'who', 'ok', 'okay', 'oh', 'ah', 'hmm', 'there', 'here'
+]);
+
+function significant(text: string): Set<string> {
+	const out = new Set<string>();
+	for (const w of bare(text).split(' ')) if (w.length > 3 && !FILLER.has(w)) out.add(w);
+	return out;
+}
+
+/**
+ * How much of the smaller reply is already contained in the larger one, as a 0-1 overlap.
+ *
+ * One-directional on purpose. A callback adds a clause to something she already said, so the new
+ * reply is mostly made of the old one and that has to read as a repeat. The reverse is not true and
+ * treating it as one would ban every callback she is meant to make.
+ */
+function overlap(a: string, b: string): number {
+	const small = significant(a);
+	const large = significant(b);
+	if (small.size < 4 || large.size === 0) return 0;
+	let shared = 0;
+	for (const w of small) if (large.has(w)) shared++;
+	return shared / small.size;
+}
+
+/**
+ * Whether these two replies are the same sentence said twice.
+ *
+ * Two conditions, because either alone is wrong. High word overlap alone would flag a callback —
+ * "you said the gym was off tonight and you were right" repeated with a question stapled on the end
+ * shares every word with the original and is not a repeat, it is the thing the prompt asks her to do.
+ * Comparing length alone would miss the version that actually shipped, which is the same sentence
+ * with "hey," stapled on the front. So: mostly the same words, and about the same size.
+ */
+function sameSentenceAgain(a: string, b: string): boolean {
+	if (overlap(a, b) < 0.8) return false;
+	const la = bare(a).length;
+	const lb = bare(b).length;
+	if (lb === 0) return false;
+	const ratio = la / lb;
+	// A repeat is the same sentence, so the lengths are within a greeting's worth of each other.
+	// Anything meaningfully longer is a callback with something new on the end of it.
+	return ratio > 0.85 && ratio < 1.2;
+}
+
+/**
+ * The earlier reply this one repeats, if any.
+ *
+ * This is the half of the repetition problem that code can actually fix. The prompt has said "do not
+ * reuse your own earlier wording" for a while and it is not enough on its own: a live run answered
+ * "hey ma how are you?" with the same "you're texting at this hour. how did you sleep" line the corpus
+ * held as the canonical example, twice, for the same student in one sitting. Instructions lose to an
+ * in-context example. A mechanical check does not.
+ *
+ * Only the most recent thing she said counts. Calling back to a line from ten messages ago is exactly
+ * what the prompt asks her to do ("they said that last week"), and retrying those would spend the
+ * student's wait reworking a line that was working.
+ */
+export function findRepeatedReply(advice: string, recent: { role: string; text: string }[]): string | null {
+	if (bare(advice).length < 12) return null;
+	for (let i = recent.length - 1; i >= 0; i--) {
+		const m = recent[i]!;
+		if (m.role !== 'mom') continue;
+		return sameSentenceAgain(advice, m.text) ? m.text : null;
+	}
+	return null;
+}
 
 export function buildRepairMessages(
 	messages: { role: string; content: string }[],
@@ -414,7 +561,9 @@ export function buildRepairMessages(
 			? `You did not include a plan. Return the envelope again with "plan" filled in: a summary and 1 to 12 blocks, each with start, end, action, detail and why. Times are HH:MM on a 24 hour clock and action must be one of the fixed list. Use this shape:\n${skeleton}`
 			: need === 'advice'
 				? `You declared chat but wrote no reply. Return the envelope again with "advice" set to what you would actually say to them. Use this shape:\n${skeleton}`
-				: `Return one JSON object and nothing else. No preamble, no code fence, no explanation after it. Use this shape:\n${skeleton}`;
+				: need === 'repeat'
+					? `You already said this, word for word, earlier in this conversation, and they will notice. Return the envelope again with "advice" set to the same warmth in completely different words: a different sentence, not a reworded version of the one below. Do not reuse any line from the examples in your instructions either, and do not ask a question you have already asked. Use this shape:\n${skeleton}`
+					: `Return one JSON object and nothing else. No preamble, no code fence, no explanation after it. Use this shape:\n${skeleton}`;
 	return [
 		...messages,
 		{ role: 'assistant', content: assistantReply.slice(0, 4000) },

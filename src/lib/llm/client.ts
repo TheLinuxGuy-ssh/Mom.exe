@@ -52,12 +52,45 @@ async function readBody(res: Response): Promise<unknown> {
 	}
 }
 
+/**
+ * Latency accounting, off unless explicitly switched on.
+ *
+ * This exists because the performance work was guesswork until it was measured. The one-shot prompt
+ * is 9,296 tokens and a 60-token control request returns in 1.0s, so roughly 3.6s of a 4.6s wait is
+ * prefill — the model reading the system prompt before it can answer. Without the prompt_tokens
+ * number in the response there is no way to tell that from "the model is slow", and the two lead to
+ * completely different fixes.
+ *
+ * Enabled with VITE_LLM_TIMING=true. Silent otherwise, because a console line per note is noise in
+ * a product console.
+ */
+function reportTiming(reqBody: Record<string, unknown>, resBody: unknown, elapsedMs: number): void {
+	if (!import.meta.env?.VITE_LLM_TIMING) return;
+	const usage = (resBody as { usage?: Record<string, unknown> } | null)?.usage ?? {};
+	const messages = (reqBody['messages'] as { content: string }[] | undefined) ?? [];
+	const promptChars = messages.reduce((n, m) => n + (m.content?.length ?? 0), 0);
+	// NIM reports prompt_tokens; OpenAI-compatible hosts that cache prefixes also report
+	// prompt_tokens_details.cached_tokens, which is the number that proves caching is working
+	const details = usage['prompt_tokens_details'] as { cached_tokens?: number } | null | undefined;
+	console.info(
+		`[llm] ${elapsedMs}ms  prompt_chars=${promptChars}  prompt_tokens=${usage['prompt_tokens'] ?? '?'}` +
+			`  cached=${details?.cached_tokens ?? 0}  completion=${usage['completion_tokens'] ?? '?'}`
+	);
+}
+
 export async function chat(
 	config: LLMConfig,
 	messages: ChatMessage[],
 	opts: { temperature?: number; timeoutMs?: number; maxTokens?: number; authToken?: string } = {}
 ): Promise<string> {
-	const { temperature = 0.4, authToken } = opts;
+	// 0.5, and the number is a measured one rather than a taste. At 0.4 the model returned the same
+	// greeting near-verbatim every time, because the corpus held one canonical "how are you" answer and
+	// low sampling made it the only likely one. At 0.6 the repetition went away and so did the plans:
+	// live eval fell from 7/8 to 5/8 valid, and — worse — the repair retry stopped rescuing the
+	// failures, dropping from 8/8 to 5/8, which is what sends a student to the template planner.
+	// The variance is bought by removing the corpus anchor and by the dedupe guard instead, which is
+	// where it belongs; sampling stays low enough that a JSON envelope survives the first attempt.
+	const { temperature = 0.5, authToken } = opts;
 	const timeoutMs = opts.timeoutMs ?? config.timeoutMs ?? 30000;
 	if (config.mode === 'proxy' && !authToken) {
 		throw new LLMError('hosted mode needs a signed-in account. sign in with email, or switch to local mode in settings.');
@@ -70,6 +103,11 @@ export async function chat(
 		model: config.model,
 		messages,
 		temperature,
+		// Passed through rather than pinned at the host. The hosted function used to hardcode 0.7,
+		// which quietly overrode this client, and 0.7 with a 9k-token prompt is narrow enough to
+		// reproduce the same line every turn. 0.95 keeps the tail of the distribution alive while
+		// temperature still decides how far she wanders.
+		top_p: 0.95,
 		max_tokens: opts.maxTokens ?? config.maxTokens ?? 1200,
 		stream: false
 	};
@@ -92,6 +130,7 @@ export async function chat(
 	}
 
 	try {
+		const started = Date.now();
 		const res = await fetch(targetUrl(config), {
 			method: 'POST',
 			headers: authHeaders(config, authToken),
@@ -100,6 +139,7 @@ export async function chat(
 		});
 
 		const resBody = await readBody(res);
+		reportTiming(reqBody, resBody, Date.now() - started);
 
 		if (!res.ok) {
 			if (res.status === 401 || res.status === 403) {

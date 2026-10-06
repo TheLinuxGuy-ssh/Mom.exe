@@ -184,3 +184,109 @@ describe('the contract error a missing envelope reports', () => {
 		expect(new LLMError('model replied but no message content was found in the response')).toBeInstanceOf(Error);
 	});
 });
+describe('the routing call running beside the main one', () => {
+	/**
+	 * The classifier is started in parallel with the one-shot rather than awaited first, because
+	 * awaiting it cost a serial round trip on every note. But an unbounded wait was worse than the
+	 * win was worth: NVIDIA's shared free tier queues the second request when two arrive at once, and
+	 * one interleaved run came back at 46.7s.
+	 *
+	 * So the verdict is taken if it has landed and dropped if it has not. Dropping it is not a new
+	 * failure mode — a null verdict is already what a timed-out or erroring classifier produces, and
+	 * the model declares its own intent in that case.
+	 */
+	it('does not wait on a classifier that never answers', async () => {
+		const original = globalThis.fetch;
+		let calls = 0;
+		globalThis.fetch = (async (input: any) => {
+			calls += 1;
+			// call 1 is the classifier in flight; call 2 is the one-shot
+			if (calls === 1) return new Promise<Response>(() => undefined); // never settles
+			return new Response(
+				JSON.stringify({
+					choices: [
+						{
+							message: {
+								content: JSON.stringify({
+									intent: 'chat',
+									understanding: null,
+									advice: 'ha. go on then, i am listening',
+									plan: null,
+									handoff: null,
+									digest: []
+								})
+							}
+						}
+					]
+				}),
+				{ status: 200, headers: { 'Content-Type': 'application/json' } }
+			);
+		}) as typeof fetch;
+
+		try {
+			const started = Date.now();
+			const res = await generateFromNote(
+				{ note: 'i just wanted to talk', context: context(), profile: profile(), stats: stats(), today: today() },
+				{ ...config, timeoutMs: 5000 }
+			);
+			// the 300ms grace period is a bound, not a hang
+			expect(Date.now() - started).toBeLessThan(2500);
+			expect(res.intent).toBe('chat');
+			expect(res.advice).toContain('listening');
+		} finally {
+			globalThis.fetch = original;
+		}
+	});
+
+	it('still uses the classifier when it answers in time', async () => {
+		// classifier says chat, the one-shot returns a plan: the classifier's vote is what stops a
+		// feeling turning into a wall of blocks, so it must not be silently dropped
+		const original = globalThis.fetch;
+		let calls = 0;
+		globalThis.fetch = (async () => {
+			calls += 1;
+			if (calls === 1) {
+				return new Response(JSON.stringify({ choices: [{ message: { content: '{"intent":"chat"}' } }] }), {
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				});
+			}
+			return new Response(
+				JSON.stringify({
+					choices: [
+						{
+							message: {
+								content: JSON.stringify({
+									intent: 'plan',
+									understanding: null,
+									advice: null,
+									plan: {
+										summary: 'a day',
+										flags: [],
+										blocks: [
+											{ start: '19:00', end: '20:00', action: 'study_block', detail: 'read', why: '' }
+										]
+									},
+									handoff: null,
+									digest: []
+								})
+							}
+						}
+					]
+				}),
+				{ status: 200, headers: { 'Content-Type': 'application/json' } }
+			);
+		}) as typeof fetch;
+
+		try {
+			const res = await generateFromNote(
+				{ note: 'honestly today was awful', context: context(), profile: profile(), stats: stats(), today: today() },
+				config
+			);
+			expect(res.intent).toBe('chat');
+			expect(res.output).toBeNull();
+		} finally {
+			globalThis.fetch = original;
+		}
+	});
+});

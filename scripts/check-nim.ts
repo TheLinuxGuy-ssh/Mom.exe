@@ -1,24 +1,11 @@
-import { readFileSync } from 'node:fs';
+import { resolveProvider, loadEnv } from './provider';
 
-function loadEnv(): Record<string, string> {
-	const out: Record<string, string> = {};
-	for (const f of ['.env', '.env.local']) {
-		try {
-			for (const line of readFileSync(f, 'utf8').split('\n')) {
-				const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
-				if (m) out[m[1]] = m[2].trim();
-			}
-		} catch {
-			continue;
-		}
-	}
-	return out;
-}
 
-const env = { ...loadEnv(), ...process.env };
-const KEY = env.NIM_API_KEY;
-const MODEL = env.NIM_MODEL ?? env.VITE_NIM_MODEL ?? 'openai/gpt-oss-20b';
-const URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
+const provider = resolveProvider();
+const env = loadEnv();
+const KEY = provider.key;
+const MODEL = provider.model;
+const URL = provider.url;
 
 /**
  * Order matters: whatever VITE_NIM_MODEL is set to is tried first, so a deliberate switch needs no
@@ -84,8 +71,10 @@ async function probe(model: string): Promise<{ status: number; note: string }> {
 
 async function main(): Promise<void> {
 	console.log(`model under test: ${MODEL}`);
+	console.log(`provider: ${provider.name} (${URL})`);
 	if (!KEY) {
-		console.log('NIM_API_KEY not found in .env or the environment. get one at https://build.nvidia.com\n');
+		console.log('MODEL_API_KEY not found in .env or the environment.\n');
+		console.log('  NVIDIA NIM: https://build.nvidia.com      Groq: https://console.groq.com/keys\n');
 	}
 
 	const seen = new Set<string>();
@@ -102,11 +91,11 @@ async function main(): Promise<void> {
 	}
 
 	if (working && working !== MODEL) {
-		console.log(`\nyour VITE_NIM_MODEL is ${MODEL}, which does not work with this key.`);
-		console.log(`set it to the live one:  VITE_NIM_MODEL=${working}`);
+		console.log(`\nyour MODEL_ID is ${MODEL}, which does not work with this key.`);
+		console.log(`set it to the live one:  VITE_MODEL_ID=${working}`);
 	} else if (working) {
 		console.log(`\nNIM is working end to end with ${working}.`);
-		console.log('keep NIM_API_KEY as a Supabase edge-function secret, then: supabase functions deploy plan');
+		console.log('keep MODEL_API_KEY as a Supabase edge-function secret, then: supabase functions deploy plan');
 	} else {
 		console.log('\nnone of the candidates returned 200 with this key. check that the key is active at https://build.nvidia.com');
 	}

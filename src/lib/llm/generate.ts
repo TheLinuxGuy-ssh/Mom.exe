@@ -16,7 +16,13 @@ import {
 import { chat, LLMError } from './client';
 import { extractJsonText, salvageAdvice } from './parse';
 import { polishAdvice } from './dialogue';
-import { buildClassifyFirstMessages, buildOneShotMessages, buildRepairMessages, parseClassification } from './prompt';
+import {
+	buildClassifyFirstMessages,
+	buildOneShotMessages,
+	buildRepairMessages,
+	findRepeatedReply,
+	parseClassification
+} from './prompt';
 import { tryParseJson } from './parse';
 import { normalizePlan } from './normalize';
 import { templatePlan } from './template';
@@ -56,6 +62,15 @@ export interface OneShotArgs {
  * whole thing looked like the model had got worse. Never let this dip below 64.
  */
 export const CLASSIFIER_MAX_TOKENS = 64;
+
+/**
+ * How long the main call will wait for a routing verdict it started in parallel.
+ *
+ * Long enough to catch the classifier on a fast host (it answers in ~840ms on a warm connection),
+ * short enough that a provider queuing the second request costs a bounded 300ms instead of the
+ * 40-odd seconds it actually took before this was capped.
+ */
+const ROUTING_GRACE_MS = 300;
 
 export interface OneShotResult {
 	intent: Intent;
@@ -270,36 +285,50 @@ export async function generateFromNote(args: OneShotArgs, configOverride?: LLMCo
 	const forced = intentHint(args.note);
 	if (forced === 'plan') return answer(args, config, messages, forced, null);
 
-	// One short voice-free routing call first. Cheap, and it keeps the big voice prompt from
-	// interfering with the single decision it is worst at.
-	let routed: 'chat' | 'plan' | null = null;
-	if (!wantsPlan && !args.preclassified) {
-		try {
-			const verdict = await chat(config, buildClassifyFirstMessages(args.note, args.context), {
-				temperature: 0,
-				maxTokens: CLASSIFIER_MAX_TOKENS,
-				timeoutMs: 15000,
-				authToken: args.authToken
-			});
-			routed = parseClassification(verdict);
+	// One short voice-free routing call. Cheap, and it keeps the big voice prompt from interfering
+	// with the single decision it is worst at.
+	//
+	// It is *started* here and awaited inside `answer`, after the one-shot has been issued. Awaiting
+	// it here instead cost a full serial round trip on every note: measured at 840ms median against
+	// a 4.6s median one-shot, that is 15% of the user's wait spent on a verdict the one-shot does
+	// not need until it has already finished. The two calls are independent, so they overlap.
+	const routing = wantsPlan || args.preclassified ? null : classify(config, args);
+
+	return answer(args, config, messages, null, routing);
+}
+
+/**
+ * The routing verdict, as a promise the caller can await whenever it becomes useful.
+ *
+ * Never rejects: a classifier that fails leaves routing to the model's own declaration, which is the
+ * behaviour it has always had. It does not swallow the reason though — a bare catch is what let a
+ * rejected request hide for days while the blame sat with the model.
+ */
+function classify(
+	config: LLMConfig,
+	args: OneShotArgs
+): Promise<'chat' | 'plan' | null> {
+	return chat(config, buildClassifyFirstMessages(args.note, args.context), {
+		temperature: 0,
+		maxTokens: CLASSIFIER_MAX_TOKENS,
+		timeoutMs: 15000,
+		authToken: args.authToken
+	})
+		.then((verdict) => {
+			const routed = parseClassification(verdict);
 			// a Hindi note saying how the day felt is not a scheduling request, however the
 			// classifier reads romanized Hindi. it keeps the model's own answer rather than being
 			// overruled into a timetable.
-			if (routed === 'plan' && isHinglishFeeling(args.note)) routed = null;
-		} catch (e) {
-			// Routing still stands without it: the main call declares its own intent and we use that.
-			// But never swallow the reason in silence. A bare catch here is what let a rejected
-			// request hide for days while the blame sat with the model.
-			routed = null;
+			return routed === 'plan' && isHinglishFeeling(args.note) ? null : routed;
+		})
+		.catch((e) => {
 			console.warn(
 				`[mom-exe] intent classifier unavailable, using the model's own intent instead: ${
 					e instanceof LLMError ? e.message : String(e)
 				}`
 			);
-		}
-	}
-
-	return answer(args, config, messages, null, routed);
+			return null;
+		});
 }
 
 /**
@@ -316,7 +345,7 @@ async function answer(
 	config: LLMConfig,
 	messages: { role: string; content: string }[],
 	override: 'plan' | 'chat' | null,
-	routed: 'chat' | 'plan' | null
+	routing: Promise<'chat' | 'plan' | null> | null
 ): Promise<OneShotResult> {
 	let understanding: Extraction | null = null;
 	let advice: string | null = null;
@@ -328,7 +357,40 @@ async function answer(
 	 * each parse, not once: the repair retry replaces the whole envelope, and taking that second
 	 * answer at face value threw away the override, so a note we had already decided was a plan
 	 * could still come back as a chat.
+	 *
+	 * `routed` is read at call time rather than captured, because the routing promise is only
+	 * resolved by `awaitRouted` above — after the one-shot has already been issued and is running.
 	 */
+	let routed: 'chat' | 'plan' | null = null;
+	let routingSettled = false;
+	/**
+	 * Take the routing verdict if it has landed, and otherwise give up on it.
+	 *
+	 * The deadline is the whole point. Overlapping the classifier with the one-shot is worth about
+	 * 800ms in the median — measured interleaved against the same provider, 6.3s parallel versus 8.9s
+	 * sequential — but an unbounded wait made the tail far worse than the win was worth: one run came
+	 * back at 46.7s, because NVIDIA's shared free tier queues the second request when two arrive at
+	 * once. So the verdict is taken if it is already there, and dropped if it is not.
+	 *
+	 * Dropping it is not a new failure mode. `routed` staying null is exactly what happens today when
+	 * the classifier times out or errors, and the pipeline already handles that: the model declares its
+	 * own intent and the deterministic `intentHint` still outranks both. The bound keeps the win on
+	 * every provider that serves two requests happily, and removes the cliff on one that does not.
+	 */
+	const awaitRouted = async (): Promise<void> => {
+		if (routingSettled || !routing) return;
+		routingSettled = true;
+		let landed = false;
+		const tracked = routing.then((v) => {
+			landed = true;
+			return v;
+		});
+		await Promise.race([
+			tracked,
+			new Promise<void>((resolve) => setTimeout(resolve, ROUTING_GRACE_MS))
+		]);
+		if (landed) routed = await tracked;
+	};
 	const settle = (parsed: OneShotParsed): OneShotParsed => {
 		let out = parsed;
 		// The classifier gets the casting vote: it saw the note with nothing else in the way. This is
@@ -350,6 +412,9 @@ async function answer(
 		let text = await ask(config, messages, { temperature: 0.4, authToken: args.authToken });
 		lastRaw = text;
 		lastProse = proseOnly(text);
+		// the routing call has been running in parallel with the one-shot for its entire duration, so
+		// by now it is settled or close to it, and awaiting it here costs nothing
+		await awaitRouted();
 		let parsed = settle(parseOneShot(text));
 		understanding = parsed.understanding;
 		advice = polishReply(reconcileAdviceWithPlan(parsed.advice, args.context.prior_plan));
@@ -385,11 +450,45 @@ async function answer(
 			text = await ask(config, retryMessages, { temperature: 0.2, authToken: args.authToken });
 			lastRaw = text;
 			lastProse = proseOnly(text);
+			await awaitRouted();
 			parsed = settle(parseOneShot(text));
 			understanding = parsed.understanding ?? understanding;
 			advice = polishReply(reconcileAdviceWithPlan(parsed.advice, args.context.prior_plan) ?? advice);
 			// a retry replaces the whole envelope, so prefer the newer digest but keep the
 			// old one rather than losing a week of memory to a flaky second response
+			digest = parsed.digest.length > 0 ? parsed.digest : digest;
+		}
+
+		/**
+		 * The mechanical half of the repetition fix, and the half that does not depend on the model
+		 * taking an instruction at face value.
+		 *
+		 * She answered "hey ma how are you?" with the same "how did you sleep" line twice in one
+		 * sitting, because the corpus holds that sentence as the canonical greeting and a prompt rule
+		 * loses to an in-context example. The prompt now varies the exemplars and says outright that
+		 * they teach the move and not the words, but that is still a request. This is a check: if the
+		 * finished advice is the same sentence she already said this conversation, ask for it again,
+		 * once, naming the line.
+		 *
+		 * One retry, not a loop. A model that cannot be made to vary on the second asking is going to
+		 * waste the student's wait on a third round trip, and a reply that repeats is still a reply.
+		 */
+		const repeated = advice ? findRepeatedReply(advice, args.context.conversation.recent) : null;
+		if (repeated) {
+			const retryMessages = buildRepairMessages(
+				messages,
+				text,
+				`you already said: ${repeated.slice(0, 200)}`,
+				'repeat'
+			);
+			text = await ask(config, retryMessages, { temperature: 0.8, authToken: args.authToken });
+			lastRaw = text;
+			lastProse = proseOnly(text);
+			await awaitRouted();
+			parsed = settle(parseOneShot(text));
+			understanding = parsed.understanding ?? understanding;
+			advice =
+				polishReply(reconcileAdviceWithPlan(parsed.advice, args.context.prior_plan)) ?? advice;
 			digest = parsed.digest.length > 0 ? parsed.digest : digest;
 		}
 

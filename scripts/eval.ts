@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import { PERSONAS } from '../dev-fixtures/personas';
 import { buildContext, buildTodayInfo } from '../src/lib/engine/context';
 import { computeStats } from '../src/lib/engine/stats';
@@ -9,9 +8,10 @@ import { nowMinutesInTz } from '../src/lib/engine/time';
 import { heuristicExtract, mergeUnderstanding } from '../src/lib/engine/extract';
 import type { Profile, Checkin } from '../src/lib/storage/types';
 import { supportsReasoningEffort } from '../src/lib/llm/capabilities';
+import { resolveProvider, loadEnv } from './provider';
 
-const NIM_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
-const MODEL = process.env.NIM_MODEL ?? 'openai/gpt-oss-20b';
+const provider = resolveProvider();
+const MODEL = provider.model;
 const RUNS = Number(process.env.EVAL_RUNS ?? 2);
 
 const MEDICAL_RE = /(calorie|diagnos|medication|antidepressant|prescribe|weight loss|bmi)/i;
@@ -40,44 +40,28 @@ const NOTES: { text: string; expect: { sleep_hours?: number; slept_at?: string; 
 	}
 ];
 
-/**
- * Read the provider key out of `.env`.
- *
- * Without this the script silently measures the *template planner* instead of the model and prints a
- * confident 8/8 that means nothing. `student-test.ts` has always loaded the key; this one did not,
- * which made it the most misleading script in the project — it looked like the model passing a test
- * the model never ran.
+/*
+ * Provider settings come from `.env`, then the real environment, so an export always wins over a
+ * file. Without loading them at all this script silently measures the *template planner* and prints
+ * a confident 8/8 that the model had nothing to do with — the most misleading number in the project,
+ * because it looks like the model passing a test the model never ran.
  */
-function loadKey(): void {
-	for (const f of ['.env', '.env.local']) {
-		try {
-			const raw = readFileSync(f, 'utf8');
-			for (const line of raw.split('\n')) {
-				const m = /^(NIM_API_KEY|NIM_MODEL)=(.+)$/.exec(line.trim());
-				if (m && !process.env[m[1]!]) process.env[m[1]!] = m[2];
-			}
-		} catch {
-			continue;
-		}
-	}
-}
-
-loadKey();
+for (const [k, v] of Object.entries(loadEnv())) if (!process.env[k]) process.env[k] = v;
 
 async function callNim(
 	messages: { role: string; content: string }[],
-	temperature = 0.4
+	temperature = Number(process.env.EVAL_TEMPERATURE ?? 0.5)
 ): Promise<string> {
-	const key = process.env.NIM_API_KEY;
-	if (!key) throw new Error('NIM_API_KEY not set');
-	const res = await fetch(NIM_URL, {
+	const key = provider.key;
+	if (!key) throw new Error('MODEL_API_KEY not set');
+	const res = await fetch(provider.url, {
 		method: 'POST',
 		headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', Accept: 'application/json' },
 		body: JSON.stringify({
 			model: MODEL,
 			messages,
 			temperature,
-			top_p: 0.7,
+			top_p: 0.95,
 			max_tokens: 1200,
 			// gated for the same reason as the app: this is an OpenAI/gpt-oss field, and Gemma has
 			// no such parameter
@@ -126,7 +110,7 @@ interface NoteRow {
 
 async function evalPlans(): Promise<void> {
 	const rows: PlanRow[] = [];
-	const withModel = Boolean(process.env.NIM_API_KEY);
+	const withModel = Boolean(provider.key);
 	const tz = 'Asia/Kolkata';
 
 	for (const persona of PERSONAS) {
@@ -188,9 +172,9 @@ async function evalPlans(): Promise<void> {
 
 	console.log('\n== PLAN GENERATION ==');
 	if (withModel) {
-		console.log(`model: ${MODEL} (live)`);
+		console.log(`model: ${MODEL} via ${provider.name} (live)`);
 	} else {
-		console.log('model: NONE — no NIM_API_KEY found, so every row below is the TEMPLATE planner.');
+		console.log('model: NONE — no MODEL_API_KEY found, so every row below is the TEMPLATE planner.');
 		console.log('This measures the fallback, not the model. Not a model result.');
 	}
 	console.log('| persona | run | first shot | after retry | no medical | no shame | ms | summary |');
@@ -221,7 +205,7 @@ function freshContextFor(key: string, tz: string) {
 
 async function evalNotes(): Promise<void> {
 	const { payload } = freshContextFor('fresh', 'Asia/Kolkata');
-	const withModel = Boolean(process.env.NIM_API_KEY);
+	const withModel = Boolean(provider.key);
 	const rows: NoteRow[] = [];
 
 	for (const n of NOTES) {

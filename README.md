@@ -85,23 +85,25 @@ The app serves at `http://localhost:5173` and works with no configuration at all
 | --- | --- | --- | --- |
 | `VITE_SUPABASE_URL` | string | none | Supabase project URL. Empty selects local mode. |
 | `VITE_SUPABASE_ANON_KEY` | string | none | Supabase anon key. Safe to ship in the browser bundle. |
-| `VITE_NIM_MODEL` | string | `openai/gpt-oss-20b` | Model id forwarded to the edge function. Must be a live id. |
-| `NIM_API_KEY` | string | none | Server side secret. Never reaches the browser. Read only by local dev scripts. |
+| `VITE_MODEL_ID` | string | `openai/gpt-oss-20b` | Model id forwarded to the edge function. Must be a live id. |
+| `MODEL_API_KEY` | string | none | Server side secret. Never reaches the browser. Read by the edge function and the local dev scripts. |
+| `MODEL_BASE_URL` | string | inferred | Provider endpoint. Usually unnecessary: a `gsk_` key means Groq, `nvapi-` means NIM. |
+| `VITE_LLM_TIMING` | string | off | `true` prints elapsed ms, `prompt_tokens` and `cached_tokens` per model call. |
 
 ```dotenv
 # client-exposed: inlined into the browser bundle at build time, safe to ship
 VITE_SUPABASE_URL=
 VITE_SUPABASE_ANON_KEY=
-VITE_NIM_MODEL=openai/gpt-oss-20b
+VITE_MODEL_ID=openai/gpt-oss-20b
 
 # server-side secret: the app never reads this. the Supabase edge function does.
-#   supabase secrets set NIM_API_KEY=nvapi-...
+#   supabase secrets set MODEL_API_KEY=gsk_...
 #   supabase functions deploy plan
-# here it is only used by the local dev scripts: npm run check-nim, npm run eval
-NIM_API_KEY=
+# the local dev scripts read it too: npm run check-model, npm run eval, npm run test:student
+MODEL_API_KEY=
 ```
 
-`VITE_*` variables are the only ones Vite inlines into the bundle. That is exactly why `NIM_API_KEY` must live as a Supabase secret rather than in `.env` on a deployed build.
+`VITE_*` variables are the only ones Vite inlines into the bundle. That is exactly why `MODEL_API_KEY` must live as a Supabase secret rather than in `.env` on a deployed build.
 
 </details>
 
@@ -116,7 +118,7 @@ NIM_API_KEY=
 | `npm run check` | Runs `svelte-check` across the project. Zero errors expected. |
 | `npm test` | Vitest suite, currently 469 tests. |
 | `npm run eval` | Four synthetic personas through the live pipeline, reporting schema validity, no medical claims, no shame, and latency. |
-| `npm run check-nim` | Probes NVIDIA NIM and prints `LIVE`, `EOL`, or `NOPE` per model id. |
+| `npm run check-model` | Probes NVIDIA NIM and prints `LIVE`, `EOL`, or `NOPE` per model id. |
 | `npm run test:student` | Thirty-two first person student exchanges through the real pipeline, checking intent routing, the plan contract, and her voice. Without a key it exercises the fallback path and says so instead of scoring failures. |
 | `npm run og` | Regenerates `static/og-image.png` from `static/og-image.svg`. |
 
@@ -139,13 +141,13 @@ Notes are not re-saved into the message log on every plan, so context stays chea
 <summary>Hosted setup (Supabase + NVIDIA NIM)</summary>
 
 1. Create a Supabase project and apply the schema in the SQL editor.
-2. Deploy the edge function (it holds `NIM_API_KEY` server side).
-3. Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and `VITE_NIM_MODEL` in `.env`.
+2. Deploy the edge function (it holds `MODEL_API_KEY` server side).
+3. Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and `VITE_MODEL_ID` in `.env`.
 4. `npm run build` and deploy anywhere static.
 
 ```bash
 supabase link --project-ref <your-ref>
-supabase secrets set NIM_API_KEY=nvapi-...
+supabase secrets set MODEL_API_KEY=...
 supabase functions deploy plan
 ```
 
@@ -180,8 +182,8 @@ alternatives were measured or ruled out rather than assumed:
   bug: `reasoning_effort` is an OpenAI/gpt-oss field that OpenRouter does not accept, and sending it
   fails every request in a way that surfaces to the user as "could not reach the model". That failure
   prompted `src/lib/llm/capabilities.ts`, which is why the request shape is now model-aware.
-- **Gemma is still one env var away** if NVIDIA serves it again: set `VITE_NIM_MODEL` and run
-  `npm run check-nim`. The reasoning-parameter gate already exists to make that safe.
+- **Gemma is still one env var away** if a provider serves it again: set `VITE_MODEL_ID` and run
+  `npm run check-model`. The reasoning-parameter gate already exists to make that safe.
 
 ## Configuration
 
@@ -302,11 +304,51 @@ Set these as Vercel environment variables for both Preview and Production, then 
 | --- | --- | --- |
 | `VITE_SUPABASE_URL` | for hosted mode | Your project URL. Setting it selects proxy mode. |
 | `VITE_SUPABASE_ANON_KEY` | for hosted mode | Public anon key, safe in the browser. |
-| `VITE_NIM_MODEL` | recommended | A live NVIDIA NIM model id such as `openai/gpt-oss-20b`. |
+| `VITE_MODEL_ID` | recommended | A live model id such as `openai/gpt-oss-20b`. |
 
-`NIM_API_KEY` must **not** be a Vercel build variable. Only `VITE_*` variables reach the browser, and the key is read only by the Supabase edge function.
+`MODEL_API_KEY` must **not** be a Vercel build variable. Only `VITE_*` variables reach the browser, and the key is read only by the Supabase edge function.
 
 One post deploy chore: upload `static/og-image.png` under repo Settings then Social preview, so link previews show the thumbnail instead of the README. The domain is already set in `src/app.html`, `static/robots.txt` and `static/sitemap.xml`.
+
+## Latency
+
+Worth writing down, because the obvious guess was wrong.
+
+| Measurement | Prompt tokens | Median |
+| --- | --- | --- |
+| Control request, almost no prompt | ~60 | **1.0s** |
+| The real one-shot call | **9,296** | **4.6s** |
+
+So about 3.6s of a 4.6s note is **prefill** — the model reading the system prompt before it writes a
+word. The reply itself is only ~200 tokens. Nothing about the token budget or the voice rules is the
+problem; the size of the prompt being read on every single note is.
+
+Three things came out of measuring that:
+
+1. **`reasoning_effort: 'low'` is load-bearing.** Removing the parameter entirely costs **17–20s** and
+   returns `completion_tokens: 1200, finish_reason: length` — the whole budget spent on reasoning and
+   no answer at all. Measured, not assumed; do not "simplify" this away.
+
+2. **NVIDIA NIM caches no prefix.** Three identical calls all reported `prompt_tokens: 9296` with no
+   speedup, so that prefill is paid in full every time. Groq serves the same model under the same slug
+   and caches static prefixes automatically, which is the whole reason the provider is configurable.
+   The prompt is already laid out optimally for it — static system messages first, the variable note
+   and context in one trailing user message — so nothing needed rearranging.
+
+3. **The routing call runs beside the main one, with a 300ms deadline.** It used to be awaited first,
+   a fully serial round trip costing ~840ms on every note. Overlapping it is worth about that much in
+   the median (6.3s parallel versus 8.9s sequential, interleaved to control for provider load) — but an
+   unbounded wait was much worse than the win was worth, because NIM's shared free tier queues the
+   second request when two arrive at once, and one run came back at 46.7s. So the verdict is taken if
+   it has landed and dropped if not, which is exactly what already happened when the classifier timed
+   out. The model declares its own intent in that case, and `intentHint` still outranks both.
+
+**Streaming was considered and rejected.** The reply is a single JSON envelope, so there is nothing to
+render until it is complete; streaming would change nothing a user can see.
+
+Turn on `VITE_LLM_TIMING=true` to see all of this yourself: it logs elapsed ms, `prompt_tokens` and
+`cached_tokens` per call. The `cached_tokens` figure is how you confirm a provider is actually caching
+the prompt rather than pretending to.
 
 ## Troubleshooting
 
@@ -328,7 +370,7 @@ There is no `/health` route: the function answers `GET` on its own path, so a `/
 **2. Is your model still on NVIDIA NIM?** Model ids get retired without warning.
 
 ```bash
-npm run check-nim
+npm run check-model
 ```
 
 This prints `LIVE`, `EOL`, or `NOPE` per id. As of writing, `openai/gpt-oss-20b` and `moonshotai/kimi-k3` respond, while `meta/llama-3.1-8b-instruct` returns `410 Gone` and several older Qwen, Mistral, and Nemotron ids return `404`.
@@ -354,7 +396,7 @@ that this model is inconsistent and the numbers move.
 | Latency, one combined call | 9 to 35s |
 | Model output length | around 2.3k characters |
 
-**A warning about measuring this yourself.** `npm run eval` reads `NIM_API_KEY` from `.env` and prints
+**A warning about measuring this yourself.** `npm run eval` reads `MODEL_API_KEY` from `.env` and prints
 "model: NONE" if it cannot find it, because before that fix it silently measured the *template
 planner* and reported a confident 8/8 that the model had nothing to do with. A green number that
 measures nothing is worse than a red one, because it stops you looking. Check the `model:` line before

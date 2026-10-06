@@ -15,7 +15,7 @@ export function defaultLLMConfig(): LLMConfig {
 	return {
 		mode: 'proxy',
 		url: supabaseUrl ? `${supabaseUrl}/functions/v1/plan` : '',
-		model: import.meta.env?.VITE_NIM_MODEL ?? 'openai/gpt-oss-20b',
+		model: import.meta.env?.VITE_MODEL_ID ?? 'openai/gpt-oss-20b',
 		apiKey: '',
 		reasoningEffort: 'low',
 		maxTokens: 1200,

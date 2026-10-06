@@ -6,7 +6,6 @@
  * Uses the live model when NIM_API_KEY is set, and the template planner otherwise, so it is
  * useful both as a check and as a demonstration of what the fallback does.
  */
-import { readFileSync } from 'node:fs';
 import { buildContext, buildTodayInfo, buildPriorPlan } from '../src/lib/engine/context';
 import { computeStats } from '../src/lib/engine/stats';
 import { generateFromNote } from '../src/lib/llm/generate';
@@ -19,9 +18,10 @@ import { PlanOutputSchema } from '../src/lib/llm/schema';
 import { localDateInTz, nowMinutesInTz } from '../src/lib/engine/time';
 import { DIALOGUE } from '../src/lib/llm/dialogue';
 import type { Checkin, Message, Plan, Profile } from '../src/lib/storage/types';
+import { resolveProvider, loadEnv } from './provider';
 
-const NIM_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
-const MODEL = process.env.NIM_MODEL ?? 'openai/gpt-oss-20b';
+const provider = resolveProvider();
+const MODEL = provider.model;
 const TZ = 'Asia/Kolkata';
 
 const profile: Profile = {
@@ -362,38 +362,27 @@ const CASES: Case[] = [
  * The app's own client configuration, pointed at NIM directly.
  *
  * In the browser this is always the hosted proxy, which needs a signed-in user's JWT. A script has
- * no user, so it talks to NIM straight with the server-side key: same prompt, same parser, same
- * fallback, just no gateway in the way. `getLLMConfig` is untouched, so this cannot change how the
- * app itself behaves.
+ * no user, so it talks to the provider straight with the server-side key: same prompt, same parser,
+ * same fallback, just no gateway in the way. `getLLMConfig` is untouched, so this cannot change how
+ * the app itself behaves.
  */
 function llmConfig(): LLMConfig {
 	return {
 		...defaultLLMConfig(),
-		mode: process.env.NIM_API_KEY ? 'direct' : 'proxy',
+		mode: provider.key ? 'direct' : 'proxy',
 		// the whole endpoint, not just the host: in direct mode the client appends
-		// `/chat/completions` unless the url already ends in it, and a host-only base produced a
-		// 404 from `https://integrate.api.nvidia.com/chat/completions`
-		url: NIM_URL,
+		// `/chat/completions` unless the url already ends in it, and a host-only base produced a 404
+		url: provider.url,
 		model: MODEL,
-		apiKey: process.env.NIM_API_KEY ?? ''
+		apiKey: provider.key
 	};
 }
 
-function loadKey(): void {
-	try {
-		const raw = readFileSync('.env', 'utf8');
-		for (const line of raw.split('\n')) {
-			const m = /^(NIM_API_KEY|NIM_MODEL)=(.+)$/.exec(line.trim());
-			if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
-		}
-	} catch {
-		/* running without a local env is fine, the template path still exercises the parser */
-	}
-}
-
-loadKey();
+/* `.env` first, real environment last, so an export always wins over a file */
+for (const [k, v] of Object.entries(loadEnv())) if (!process.env[k]) process.env[k] = v;
 
 const priorMessages: Message[] = [];
+const caseTimes: number[] = [];
 let pass = 0;
 let fail = 0;
 const problems: string[] = [];
@@ -409,7 +398,7 @@ const live = Boolean(process.env.NIM_API_KEY);
 
 console.log(`\nwalking in as a first-year hostel student, ${new Date().toISOString().slice(0, 10)}\n`);
 if (live) {
-	console.log(`model: ${MODEL} (live, through the app's own pipeline)\n`);
+	console.log(`model: ${MODEL} via ${provider.name} (live, through the app's own pipeline)\n`);
 } else {
 	console.log('model: none. Set NIM_API_KEY in .env to run the live checks.');
 	console.log('this run exercises the fallback path only: no crashes, valid plans, no crash on the');
@@ -439,7 +428,9 @@ for (const c of CASES) {
 	 * voice survived this prompt change" and a guess. So it calls `generateFromNote` exactly as the
 	 * dashboard does, and everything below asserts on that result.
 	 */
+	const t0 = Date.now();
 	const result = await generateFromNote({ note: c.note, context: payload, profile, stats, today }, llmConfig());
+	caseTimes.push(Date.now() - t0);
 	const parsed = {
 		intent: result.intent,
 		advice: result.advice,
@@ -619,6 +610,14 @@ console.log(`everything: ${h.entries.length} rows (${h.entries.filter((e) => e.k
 console.log(`empty account reads as: ${buildHistory([], [], 'all').emptyReason}`);
 console.log('');
 
+if (caseTimes.length > 0) {
+	const sorted = [...caseTimes].sort((a, b) => a - b);
+	const at = (q: number): number => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))]!;
+	console.log(
+		`latency per note: median ${(at(0.5) / 1000).toFixed(1)}s  ` +
+			`p90 ${(at(0.9) / 1000).toFixed(1)}s  max ${(Math.max(...caseTimes) / 1000).toFixed(1)}s`
+	);
+}
 if (live) console.log(`intent matched: ${pass}/${CASES.length}`);
 else console.log(`ran ${CASES.length} exchanges through the fallback path. intent and voice were not evaluated.`);
 if (problems.length) {
