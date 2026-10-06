@@ -642,6 +642,92 @@ export function renderMoves(maxPerMove = 4): string {
 	].join('\n');
 }
 /**
+ * The scorekeeping register, rewritten.
+ *
+ * The same lesson as the banned openers below, applied to the one rule in this app that is about the
+ * student rather than about her. The prompt bans these words by name, in every field, with the
+ * reasoning spelled out and a swap table. A tone audit against ten live notes found "you skipped
+ * dinner" in a block `why`, "you missed it earlier" in another, and "you missed the 9-10 class" in an
+ * advice. Half the replies, from a model that had been told.
+ *
+ * These are substitutions rather than deletions. Cutting "you missed dinner" leaves a fragment, and a
+ * fragment is worse than the offence: "dinner didn't happen, so eat something" is about the thing and
+ * still sounds like her. Every replacement below keeps the meaning and moves the subject from the
+ * student to the block, which is the whole difference between nagging and loving.
+ */
+/**
+ * The scorekeeping register, rewritten.
+ *
+ * Substitution, never deletion. The first version of this removed the banned words outright and turned
+ * "you missed dinner" into "dinner" and "you didn\'t get sleep" into "no" — worse than what it replaced,
+ * because a fragment on the screen is worse than an accusation in it. Every rule below keeps the object
+ * and moves the subject: from the student to the thing. That difference is the whole line between
+ * nagging and loving, and "you missed dinner" becoming "dinner didn\'t happen" is the same information
+ * said by a mother instead of a mark sheet.
+ */
+const SCOREKEEPING_SWAPS: [RegExp, string][] = [
+	// "you missed" with no object: the whole clause is the verdict and there is nothing to keep, so
+	// it becomes a statement about the thing. Runs first because these read the word on its own, and
+	// by the time the rules below have stripped "you" there is nothing here left to match.
+	[/^\s*you\s+missed\s*$/i, 'that did not happen'],
+	[/^\s*you\s+skipped\s*$/i, 'that did not happen'],
+	// The object survives, the accusation does not. "you missed dinner" reads as a mark on a
+	// report; "dinner" reads as a thing that happened tonight, which is the whole difference.
+	[/\byou\s+(?:missed|skipped|failed)\s+(?:the\s+|your\s+|that\s+|on\s+)?/gi, ''],
+	// The contraction without the apostrophe comes up too: the model writes "you didnt sleep" and the
+	// apostrophe-only pattern let it straight through the first version of this.
+	[/\byou\s+(?:didn'?t|didn\u2019t|did not)\s+(?:get|do|have|finish|complete|attend|make|eat|sleep|study|prepare|drink|hydrate|manage)\s*/gi, 'no '],
+	[/\byou\s+(?:shouldn'?t|shouldn\u2019t|should not)\s+have\s+/gi, ''],
+	[/\byou\s+(?:shouldn'?t|shouldn\u2019t|should not)\s+(?:be\s+)?(?:miss|skip|fail)\w*\s+/gi, ''],
+	[/\byou\s+were\s+supposed\s+to\s+/gi, ''],
+	[/\byou\s+neglected\s+/gi, ''],
+	// "fell behind" and "wasted" without an object: nothing to keep, so the whole clause goes rather
+	// than the whole sentence. Left alone above, "you fell behind" came through untouched.
+	[/\byou\s+fell\s+behind\b\s*(?:on\s+[^,.!?]{0,30})?/gi, 'it slipped'],
+	[/\byou\s+wasted\s+(?:the\s+|a\s+|some\s+|all\s+)?/gi, ''],
+	[/(?:wasted|ruined)\s+(?:the\s+|a\s+|an\s+|all\s+|your\s+)/gi, 'let go of the '],
+	[/\byou(?:’|')?re\s+lazy\b/gi, 'you are tired'],
+	// "you didn't get sleep" inverts the word order, so this one cannot just delete. The verb list has
+	// to include the bare nouns: "you didnt sleep" left a comma and no subject, and came out as
+	// "no, so nap now".
+	[/\byou\s+(?:didn'?t|didn\u2019t|did not)\s+(sleep|eat|drink|hydrate|rest|exercise|attend|finish)\s*/gi, 'no $1 '],
+];
+
+/**
+ * Strip the mark-sheets out of one field, whichever field it is.
+ *
+ * Applied to advice, summary, data_note and every block detail and why, because all of them are
+ * rendered on screen and the prompt says so explicitly. A reply where only the advice is cleaned is
+ * a reply that still calls the student a failure three lines further down.
+ */
+export function deScorekeep(text: string): string {
+	let out = text;
+	for (const [re, with_] of SCOREKEEPING_SWAPS) out = out.replace(re, with_);
+	return out
+		.replace(/\s{2,}/g, ' ')
+		.replace(/\s+([,.!?])/g, '$1')
+		.replace(/^[,.:;]\s*/, '')
+		.trim();
+}
+
+/** Every rendered field, cleaned. The one entry point the pipeline should use. */
+export function deScorekeepPlan<
+	T extends { summary: string; data_note?: string; blocks: { detail: string; why: string }[] }
+>(plan: T): T {
+	const cleaned: T = {
+		...plan,
+		summary: deScorekeep(plan.summary),
+		blocks: plan.blocks.map((b) => ({
+			...b,
+			detail: deScorekeep(b.detail),
+			why: deScorekeep(b.why)
+		}))
+	};
+	if (plan.data_note) cleaned.data_note = deScorekeep(plan.data_note);
+	return cleaned;
+}
+
+/**
  * Openers that make her sound like a support chatbot rather than a mother.
  *
  * These survived a prompt that bans them by name, which is the honest lesson about prompt bans: they

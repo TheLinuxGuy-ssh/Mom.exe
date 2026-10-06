@@ -15,11 +15,12 @@ import {
 } from './schema';
 import { chat, LLMError } from './client';
 import { extractJsonText, salvageAdvice } from './parse';
-import { polishAdvice } from './dialogue';
+import { deScorekeep, deScorekeepPlan, polishAdvice } from './dialogue';
 import {
 	buildClassifyFirstMessages,
 	buildOneShotMessages,
 	buildRepairMessages,
+	echoesTheStudent,
 	findRepeatedReply,
 	findSoftRegister,
 	parseClassification
@@ -190,9 +191,23 @@ export function parseOneShot(text: string): OneShotParsed {
 	};
 }
 
-/** Typing nothing meaningful ("idk", "hm", "idk what to do") is a request to be planned, not a
- * conversation. Decided here because the send button promises exactly that, and a model asked
- * to classify a contentless note tends to invent something to react to. */
+/**
+ * Nothing was actually asked, so treat the press as "plan my day".
+ *
+ * The send button promises a plan, and a model handed a contentless note tends to invent something to
+ * react to. This exists to cover that, and it is deliberately narrow as a result.
+ *
+ * The line that was here used to catch greetings too — `hi`, `hey`, `thanks`, `bye` all returned true,
+ * so opening the conversation with a greeting overwrote the day with a timetable. Its own comment
+ * said the opposite ("small talk, not a scheduling request") while the code below it did exactly that,
+ * which is how it survived so long. The prompt has always been on the other side of this: "a short
+ * note that was actually TYPED is never this case — 'hi', 'hey mom', 'good morning', 'thanks' are all
+ * things a person wrote, so they follow the chat rules above". Greetings and acknowledgements are
+ * therefore left to the model, which routes them as chat.
+ *
+ * `k` is the one that stays. On its own it is the terse reply to something she just said, and a
+ * student pressing "what do I do now?" and typing "k" is asking for the plan.
+ */
 export function isContentFree(note: string | null): boolean {
 	if (note === null) return true;
 	const t = note.trim().toLowerCase();
@@ -200,13 +215,11 @@ export function isContentFree(note: string | null): boolean {
 	// punctuation and whitespace carry nothing: "..", "??"
 	if (/^[\s.!?]+$/.test(t)) return true;
 
-	// pure filler, no information at all: "idk", "hm", "hmm", "idk what to do"
-	if (/^(idk|hm+|hmm+|k|nah|nope|whatever|maybe|not sure|who knows)\b[\s.!?]*$/.test(t)) return true;
+	// pure filler, no information at all: "hm", "hmm", "who knows"
+	if (/^(hm+|hmm+|k|nah|nope|whatever|maybe|not sure|who knows)\b[\s.!?]*$/.test(t)) return true;
 	// filler that trails into a bare request, but only while it stays short. Anything with real
 	// content in it ("idk what to do about tomorrow, lab until 7") is a genuine note.
 	if (/^(idk|hm+|hmm+|not sure)\b/.test(t) && t.length <= 24) return true;
-	// a greeting or an acknowledgement on its own is small talk, not a scheduling request
-	if (/^(hi|hey|hello|yo|sup|ok|okay|k|cool|nice|thanks|thank you|bye)\b[\s.!?]*$/.test(t)) return true;
 
 	return false;
 }
@@ -493,14 +506,24 @@ async function answer(
 		// `conversation` is optional on ContextPayload and a payload built without one would throw
 		// here, which lands in the catch below and quietly costs the student their model's answer.
 		// The checks are an improvement, not a dependency.
-		const repeated = advice ? findRepeatedReply(advice, recentWindow) : null;
-		const soft = !repeated && parsed.intent === 'chat' && advice ? findSoftRegister(advice) : null;
-		if (!repaired && (repeated || soft)) {
+		const echoed = advice && echoesTheStudent(advice, args.note) ? advice : null;
+		const repeated = echoed
+			? null
+			: advice
+				? findRepeatedReply(advice, recentWindow)
+				: null;
+		const soft =
+			!repeated && !echoed && parsed.intent === 'chat' && advice ? findSoftRegister(advice) : null;
+		if (!repaired && (repeated || soft || echoed)) {
 			const retryMessages = buildRepairMessages(
 				messages,
 				text,
-				repeated ? `you already said: ${repeated.slice(0, 200)}` : (soft as string),
-				repeated ? 'repeat' : 'register'
+				repeated
+					? `you already said: ${repeated.slice(0, 200)}`
+					: echoed
+						? `you sent their own message back to them: ${echoed.slice(0, 200)}`
+						: (soft as string),
+				repeated ? 'repeat' : echoed ? 'echo' : 'register'
 			);
 			text = await ask(config, retryMessages, { temperature: 0.8, authToken: args.authToken });
 			lastRaw = text;
@@ -517,7 +540,9 @@ async function answer(
 			return {
 				intent: 'chat',
 				understanding: parsed.understanding ?? understanding,
-				advice,
+				// same guard as the plan path: the advice is rendered on screen, so "you skipped
+				// breakfast" in a chat reply is the same offence as one in a block
+				advice: advice ? deScorekeep(advice) : advice,
 				output: null,
 				handoff: parsed.handoff,
 				digest,
@@ -530,8 +555,12 @@ async function answer(
 			return {
 				intent: 'plan',
 				understanding: parsed.understanding ?? understanding,
-				advice,
-				output: parsed.plan,
+				// every rendered field goes through the scorekeeping guard, not just the advice. A
+				// tone audit found "you skipped dinner" in a block's "why" while the advice was clean,
+				// and "you missed the 9-10 class" in an advice: the prompt bans these words in all
+				// fields and the model uses them anyway.
+				advice: advice ? deScorekeep(advice) : advice,
+				output: deScorekeepPlan(parsed.plan),
 				handoff: null,
 				digest,
 				model_id: config.model,
@@ -550,7 +579,7 @@ async function answer(
 			return {
 				intent: 'chat',
 				understanding: null,
-				advice: polishReply(salvage),
+				advice: deScorekeep(polishReply(salvage) ?? ''),
 				output: null,
 				handoff: null,
 				digest,
@@ -566,7 +595,7 @@ async function answer(
 			return {
 				intent: 'chat',
 				understanding,
-				advice: polishReply(prose),
+				advice: deScorekeep(polishReply(prose) ?? ''),
 				output: null,
 				handoff: null,
 				digest,

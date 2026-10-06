@@ -93,14 +93,29 @@ function respondWith(...contents: string[]): { restore: () => void; calls: () =>
 }
 
 describe('content free notes', () => {
-	it('treats filler and greetings as a request to be planned', () => {
-		// the send button promises a plan, so "idk" and "hi" have to mean one
+	it('treats a genuinely absent note as a request to be planned', () => {
+		// the send button promises a plan, so nothing typed has to mean one
 		expect(isContentFree(null)).toBe(true);
 		expect(isContentFree('   ')).toBe(true);
 		expect(isContentFree('...')).toBe(true);
 		expect(isContentFree('idk')).toBe(true);
-		expect(isContentFree('Hi.')).toBe(true);
-		expect(isContentFree('thanks!')).toBe(true);
+		expect(isContentFree('hmm')).toBe(true);
+		expect(isContentFree('who knows')).toBe(true);
+	});
+
+	it('leaves a typed greeting to the model, which calls it chat', () => {
+		// this returned true once and forced a timetable on someone who only said hello, which is the
+		// exact failure this app is supposed to not have. The comment above the old line said
+		// "small talk, not a scheduling request" and the code returned true anyway.
+		for (const greeting of ['hi', 'Hi.', 'hey', 'hello', 'yo', 'sup', 'ok', 'okay', 'cool', 'thanks', 'thanks!', 'bye']) {
+			expect(isContentFree(greeting), greeting).toBe(false);
+		}
+	});
+
+	it('still reads a bare "k" as asking for the plan', () => {
+		// the one terse input that stays content free: it is the reply to something she just said,
+		// and pressing "what do I do now?" and typing "k" is asking to be planned
+		expect(isContentFree('k')).toBe(true);
 	});
 
 	it('leaves a real note alone, even a short one', () => {

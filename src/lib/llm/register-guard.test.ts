@@ -162,3 +162,18 @@ describe('the surplus is cut without asking the model again', () => {
 		expect(out).not.toMatch(/do you want/i);
 	});
 });
+
+describe('the echo retry', () => {
+	it('names the echo and asks for an answer, not a copy', () => {
+		const messages = buildRepairMessages(
+			[{ role: 'user', content: 'kya karun, thak gaya hu' }],
+			'{"advice":"kya karun, thak gaya hu"}',
+			'you sent their own message back to them: kya karun, thak gaya hu',
+			'echo'
+		);
+		const last = messages[messages.length - 1]!.content;
+		expect(last).toMatch(/echo, not an answer/i);
+		expect(last).toContain('kya karun');
+		expect(last).toMatch(/say something they did not say/i);
+	});
+});

@@ -217,6 +217,11 @@ THE EXAMPLES BELOW TEACH YOU HER SHAPE, NOT A SCRIPT. Take her cadence, stance a
   happen, so get a glass now and keep the friends in mind for next time" come back word for word
   for two students who had nothing to do with each other. If you already said it, say the same
   thing differently, or say something you have not said yet.
+  NEVER ANSWER A QUESTION WITH THEIR OWN WORDS BACK. Their message is in front of you, and the
+  easiest reply to write is a copy of it: asked "kya karun, thak gaya hu" she came back with "kya
+  karun, thak gaya hu". That is an echo, not an answer, and a student can tell. If their words could
+  be the reply, they are not the reply. Answer the question — react to what they said, then say
+  something they did not say.
 - Answer, then do what a mum does: ask one thing back, or give one instruction. Never leave a
   question hanging with nothing after it.
 - EVERY CHAT REPLY CARRIES AT LEAST ONE MUM MOVE, chosen from what they just said: a light taunt at
@@ -340,6 +345,18 @@ Output raw JSON only: {"intent":"chat"} or {"intent":"plan"}
 affects today or tomorrow (a lab until 7, a deadline, a clash), said why something could not happen,
 or said the plan you gave is not working.
 
+READ THAT LIST AS A LIST, NOT AS BACKGROUND. Ask yourself the question directly: are they asking for
+their day to be arranged? Then answer "plan" if any of these is true, before you consider anything
+else. These are the sentences that came back as "chat" when this prompt already listed them:
+- "what should i do now?" / "what do i do?" / "idk what to do" — asking what to do is the single most
+  direct request for a plan there is
+- "why do i always wake up at 3am?" / "why do i keep skipping breakfast" — they want the pattern
+  understood AND fixed, so it is a plan with an explanation, not a conversation about it
+- "this schedule is not working" / "this plan does not suit me" — that is a request to redo it, said
+  as a complaint
+A question mark does not make something a conversation. "What do I do about tomorrow?" is the request.
+If the answer is "they are only talking", say what they asked for, and check it against this list.
+
 CHANGING THE PLAN IS ALWAYS "plan", however casual the sentence around it. These are instructions
 about the schedule, not conversation, and you must not let the company they keep distract you:
 - asking for something to be moved, shifted, pushed, pulled forward, delayed, swapped or dropped
@@ -460,7 +477,7 @@ Output raw JSON only, no markdown fences, no extra text.`;
  * and the retry was told its JSON was invalid — so it sent another chat, and the turn fell through
  * to the template planner. Saying "you owe me a plan" is a different instruction and it works.
  */
-export type RepairNeed = 'plan' | 'advice' | 'shape' | 'repeat' | 'register';
+export type RepairNeed = 'plan' | 'advice' | 'shape' | 'repeat' | 'register' | 'echo';
 
 /**
  * Reduce a reply to the words that carry it, so two lines can be compared without punctuation,
@@ -653,6 +670,65 @@ export function findSoftRegister(advice: string): string | null {
 	return bad.length > 0 ? bad.join('; ') : null;
 }
 
+/**
+ * Words worth comparing on.
+ *
+ * Three characters, not four, because "im tired, what do i do" has four distinct words after that cut
+ * and three is what makes an echo of a short note measurable at all.
+ *
+ * Function words go. Leaving "the" in made "ha. you topped the class. now eat something." score 3 of 3
+ * against "i topped the class!" and get called an echo, which it is not — she is reacting to them and
+ * saying something they did not. What survives the cut is the actual content of the message.
+ */
+const STOPWORDS = new Set([
+	'the', 'and', 'but', 'you', 'your', 'yours', 'are', 'was', 'were', 'been', 'being', 'this',
+	'that', 'these', 'those', 'there', 'here', 'have', 'has', 'had', 'not', 'now', 'then', 'what',
+	'when', 'where', 'who', 'why', 'how', 'did', 'does', 'can', 'will', 'would', 'should', 'could',
+	'much', 'more', 'some', 'just', 'very', 'with', 'from', 'about', 'into', 'over', 'than', 'them',
+	'they', 'its', 'his', 'her', 'our', 'out', 'off', 'again', 'also', 'too', 'get', 'got', 'for',
+	'one', 'two', 'own', 'same', 'like', 'well', 'please', 'feel', 'felt'
+]);
+
+function contentWords(text: string): string[] {
+	return bare(text)
+		.split(' ')
+		.filter((w) => w.length > 2 && !STOPWORDS.has(w));
+}
+
+/**
+ * Whether the reply is the student's own message handed back.
+ *
+ * Asked "kya karun, thak gaya hu" she came back with "kya karun, thak gaya hu" — the note, echoed.
+ * The prompt bans reusing her own earlier wording and says nothing about reusing theirs, which is the
+ * gap this sits in.
+ *
+ * Overlap rather than equality, because the echo is rarely perfect: it comes back with a question
+ * mark, or drops a word, or repeats them in their own tense. Measured on content words, since the
+ * short ones are shared by almost any two sentences.
+ */
+/** She has said something of her own before the borrowed words begin. */
+const HER_SAYS_SOMETHING_FIRST =
+	/^(ha|hmm|oh|k|sc[A-Z]?[oO]+f|ah|right|s[oO]+|listen|come here|good|honestly|fine|yes|no|well|and you)\b/i;
+
+export function echoesTheStudent(advice: string, note: string | null): boolean {
+	if (!note) return false;
+	const mine = contentWords(advice);
+	const theirs = contentWords(note);
+	if (mine.length === 0 || theirs.length === 0) return false;
+	const shared = mine.filter((w) => theirs.includes(w)).length;
+	// Both directions. Measuring only against the note made "im tired, what do i do" — a total
+	// echo — score 1 shared word against a floor of 3 and pass, because a short note has few words to
+	// match. Measuring only against the reply called "ha. the hostel was loud again." an echo of "the
+	// hostel was loud again tonight", which is her reacting to it.
+	const coversNote = shared / theirs.length;
+	const isMostlyCopy = shared / mine.length;
+	if (!(coversNote >= 0.6 && isMostlyCopy >= 0.6)) return false;
+	// A verdict in front changes what the rest of the sentence is. "ha. the hostel was loud again."
+	// borrows their nouns and is still her reacting to them; "the hostel was loud again" on its own is
+	// them, sent back. The echo that matters is the bare hand-back.
+	return !HER_SAYS_SOMETHING_FIRST.test(advice.trim());
+}
+
 export function buildRepairMessages(
 	messages: { role: string; content: string }[],
 	assistantReply: string,
@@ -675,6 +751,8 @@ export function buildRepairMessages(
 				? `You declared chat but wrote no reply. Return the envelope again with "advice" set to what you would actually say to them. Use this shape:\n${skeleton}`
 				: need === 'repeat'
 					? `You already said this, word for word, earlier in this conversation, and they will notice. Return the envelope again with "advice" set to the same warmth in completely different words: a different sentence, not a reworded version of the one below. Do not reuse any line from the examples in your instructions either, and do not ask a question you have already asked. Use this shape:\n${skeleton}`
+					: need === 'echo'
+					? `That reply was their own message sent back to them: "${error.slice(0, 200)}". That is an echo, not an answer. Return the envelope again with "advice" set to what a mother would actually SAY in response — react to what they told you, and say something they did not say. Use this shape:\n${skeleton}`
 					: need === 'register'
 						? `Your reply was correct and it read like a worksheet. Return the envelope again with "advice" set to what a mother would actually say, and fix this: ${error.slice(0, 200)}. Pick ONE order and give it, slip in the taunt about the hour or the phone or the timing of the confession, and end on a verdict or an instruction — never by asking whether they want something. Two instructions at most. Shorter, warmer, more certain. Use this shape:\n${skeleton}`
 						: `Return one JSON object and nothing else. No preamble, no code fence, no explanation after it. Use this shape:\n${skeleton}`;

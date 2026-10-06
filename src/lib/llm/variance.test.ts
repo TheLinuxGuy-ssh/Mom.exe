@@ -7,7 +7,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import { DIALOGUE } from './dialogue';
-import { buildClassifyFirstMessages, findRepeatedReply, buildRepairMessages } from './prompt';
+import {
+	buildClassifyFirstMessages,
+	buildRepairMessages,
+	echoesTheStudent,
+	findRepeatedReply
+} from './prompt';
 import type { ContextPayload } from '../engine/context';
 
 describe('greeting variance', () => {
@@ -189,5 +194,46 @@ describe('classifier sees the conversation it is routing', () => {
 	it('works with no conversation at all', () => {
 		const none = buildClassifyFirstMessages('hi', {} as ContextPayload)[1]!.content;
 		expect(JSON.parse(none).recent).toEqual([]);
+	});
+});
+
+describe('echoing the student back', () => {
+	/**
+	 * Asked "kya karun, thak gaya hu" she came back with "kya karun, thak gaya hu" — the note, sent
+	 * straight back. The prompt bans reusing her own earlier wording and said nothing about theirs,
+	 * which is the gap this sits in.
+	 */
+	it('catches the note handed back as the reply', () => {
+		expect(echoesTheStudent('kya karun, thak gaya hu', 'kya karun, thak gaya hu')).toBe(true);
+		// it comes back with a question mark
+		expect(echoesTheStudent('kya karun, thak gaya hu?', 'kya karun, thak gaya hu')).toBe(true);
+		expect(echoesTheStudent('sorry mom i was rude', 'sorry mom i was rude')).toBe(true);
+	});
+
+	it('catches it even when the note is too short to clear a word-count floor', () => {
+		// "im tired, what do i do" is one content word after the stopwords go. Counting shared words
+		// against a minimum of three let the most total echo of them all through.
+		expect(echoesTheStudent('im tired, what do i do', 'im tired, what do i do')).toBe(true);
+	});
+
+	it('lets her react to them without calling it an echo', () => {
+		// she is quoting them back on purpose, and saying something they did not say
+		expect(
+			echoesTheStudent('ha. the hostel was loud again.', 'the hostel was loud again tonight')
+		).toBe(false);
+		expect(
+			echoesTheStudent('ha. you topped the class. now eat something.', 'i topped the class!')
+		).toBe(false);
+		expect(
+			echoesTheStudent(
+				'toughest chapter first, then review. you always cram at 2am',
+				'im thinking of studying since i have my maths exam tomorrow, any tip?'
+			)
+		).toBe(false);
+	});
+
+	it('says nothing when there is no note to echo', () => {
+		expect(echoesTheStudent('ha. eat something, then bed', null)).toBe(false);
+		expect(echoesTheStudent('ha. eat something, then bed', '   ')).toBe(false);
 	});
 });

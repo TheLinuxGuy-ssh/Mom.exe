@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { DIALOGUE, MOVES, MOVES_BY_ID, renderMoves, polishAdvice, type Move } from './dialogue';
+import {
+	DIALOGUE,
+	MOVES,
+	MOVES_BY_ID,
+	deScorekeep,
+	deScorekeepPlan,
+	renderMoves,
+	polishAdvice,
+	type Move
+} from './dialogue';
 
 /** The same detectors the live student test uses, so the corpus cannot smuggle in a break. */
 const CRUEL = /\b(useless|pathetic|worthless|disgusting|idiot|loser|shame on|you are a failure)\b/i;
@@ -289,5 +298,87 @@ describe('polishing the reply', () => {
 	it('never hands back a fragment if the cut ate the sentence', () => {
 		expect(polishAdvice('I hear you.')).toBe('I hear you.');
 		expect(polishAdvice(null)).toBeNull();
+	});
+});
+
+describe('the scorekeeping guard', () => {
+	/**
+	 * The prompt bans these words in every rendered field, with the reasoning spelled out and a swap
+	 * table. A live tone audit over ten notes that invite the failure found "you skipped dinner" in a
+	 * block's `why`, "you missed it earlier" in another, and "you missed the 9-10 class" in an advice.
+	 * Half the replies, from a model that had been told. Same lesson as the banned openers: a prompt
+	 * ban lowers the odds and does not remove the possibility.
+	 */
+	const SCOREKEEPING =
+		/\b(you\s+(?:missed|failed|skipped|didn'?t|shouldn'?t have|were supposed to|neglected|wasted)|you'?re lazy|fell behind|ruined)\b/i;
+
+	it('removes every form the audit found', () => {
+		for (const text of [
+			'you skipped dinner',
+			'you missed the 9-10 class, so catch up on the notes',
+			'you missed it earlier',
+			"you didn't get sleep. get some rest now",
+			"you shouldn't have skipped breakfast",
+			'you fell behind on your reading',
+			'you wasted the whole morning',
+			'you ruined your night',
+			'you failed the test',
+			// no apostrophe: the model writes this and the apostrophe-only pattern let it through
+			'you didnt sleep, so nap now',
+			// the curly apostrophe, which the model also uses
+			'you didn’t sleep'
+		]) {
+			expect(deScorekeep(text), text).not.toMatch(SCOREKEEPING);
+		}
+	});
+
+	it('keeps the thing that happened, so the sentence still means something', () => {
+		// the first version deleted outright and turned "you missed dinner" into "dinner" and "you
+		// didn't get sleep" into "no". A fragment is worse than an accusation: the object is the whole
+		// information, and the accusation is the whole offence.
+		expect(deScorekeep('you skipped dinner')).toContain('dinner');
+		expect(deScorekeep('you missed the 9-10 class')).toContain('9-10');
+		expect(deScorekeep("you didn't get sleep")).toMatch(/sleep/);
+	});
+
+	it('leaves her approved phrasing completely alone', () => {
+		// the swap table in the prompt is right, and the model often gets it right. Guarding must not
+		// damage the version that already works.
+		for (const text of [
+			'the water didn\'t happen, so drink some',
+			'gym\'s off tonight',
+			'no dinner happened, so eat now',
+			'that one didn\'t happen tonight',
+			'study till 5pm, then dinner, then sleep'
+		]) {
+			expect(deScorekeep(text), text).toBe(text);
+		}
+	});
+
+	it('cleans every rendered field of a plan, not just the summary', () => {
+		// this is where it was found: the advice was clean and the block's "why" was not
+		const plan = {
+			summary: 'you missed the gym today',
+			data_note: 'you skipped meals twice',
+			blocks: [{ detail: 'you failed to hydrate', why: "you didn't sleep" }]
+		};
+		const out = deScorekeepPlan(plan);
+		const all = [
+			out.summary,
+			out.data_note ?? '',
+			...out.blocks.flatMap((b) => [b.detail, b.why])
+		].join(' | ');
+		expect(all).not.toMatch(SCOREKEEPING);
+	});
+
+	it('does not invent or remove content while cleaning a plan', () => {
+		const plan = {
+			summary: 'study till 5pm, then dinner, then wind down',
+			blocks: [
+				{ start: '17:00', end: '19:00', detail: 'study the last two chapters', why: 'mess closes at 9:30' },
+				{ start: '19:00', end: '20:00', detail: 'eat dinner', why: '' }
+			]
+		};
+		expect(deScorekeepPlan(plan)).toEqual(plan);
 	});
 });

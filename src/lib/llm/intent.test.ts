@@ -198,9 +198,13 @@ describe('isContentFree', () => {
 		}
 	});
 
-	it('still recognises greetings as empty, since they are not a scheduling request', () => {
-		expect(isContentFree('hey')).toBe(true);
-		expect(isContentFree('ok')).toBe(true);
+	it('leaves a typed greeting to the model, because they are not a scheduling request', () => {
+		// the reasoning above was right and the code was the opposite: this returned true, which
+		// overwrote the day with a timetable for someone who had only said hello. Not content free
+		// means the model decides, and the model routes a greeting as a conversation.
+		expect(isContentFree('hey')).toBe(false);
+		expect(isContentFree('ok')).toBe(false);
+		expect(isContentFree('thanks')).toBe(false);
 	});
 
 	it('never swallows a real note', () => {
