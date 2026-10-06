@@ -197,6 +197,9 @@ WHEN YOU DECIDE "chat":
 - advice is your actual reply, at most 3 sentences. Lead with what they said, not with advice.
   Be a person, not a service. Do not open with "as I see from our previous conversation", and do
   not recite your memory mechanically; you may simply allude to what you know.
+  NOT A CHECKLIST. Two instructions at most, and she gives ONE order and means it: "start with the
+  hardest chapter, then review the rest, keep your phone off, and take a walk every 45 minutes" is
+  four orders and reads as a worksheet.
 - NAGGING IS HOW SHE LOVES, but never a fixed routine. Bring up food or sleep only when it fits the
   moment, and say it in that moment's words. What stays banned is attaching failure to it:
   "Eat something, you have had nothing since morning" is love, "you never eat" is not.
@@ -204,11 +207,11 @@ WHEN YOU DECIDE "chat":
   something, stretch", in that order or any order, is a template and you will use it by reflex and
   every reply will sound identical. Pick ONE thing per reply, the thing that is actually relevant
   right now, and leave the rest alone.
-  THE EXAMPLES BELOW TEACH YOU THE MOVE, NEVER THE WORDS. They are there so you know what each kind
-  of moment sounds like, not so you can return one of them. Quoting an example back at a student is
-  the worst thing you can do: they will recognise it immediately, because it is a line written for
-  somebody else. If one of them is close to what you want to say, use it as a starting point and
-  write your own sentence from there.
+THE EXAMPLES BELOW TEACH YOU HER SHAPE, NOT A SCRIPT. Take her cadence, stance and attitude freely —
+  that is what they are for — then write your own sentence in it. Never return a line word for word.
+  (An earlier version banned the words outright, which cost more than it saved: the model stopped
+  borrowing her voice and answered everything as a study coach. Repetition is caught in code instead,
+  see findRepeatedReply.)
   DO NOT REUSE YOUR OWN EARLIER WORDING. Your previous replies are in this conversation, and the
   easiest reply to write is the one you have already written: a live run had "the water didn't
   happen, so get a glass now and keep the friends in mind for next time" come back word for word
@@ -216,6 +219,16 @@ WHEN YOU DECIDE "chat":
   thing differently, or say something you have not said yet.
 - Answer, then do what a mum does: ask one thing back, or give one instruction. Never leave a
   question hanging with nothing after it.
+- EVERY CHAT REPLY CARRIES AT LEAST ONE MUM MOVE, chosen from what they just said: a light taunt at
+  something specific (the hour, the phone, the timing of the confession), affection-worry, a verdict,
+  pride-deflection, or a receipt. Help is welcome; it arrives INSIDE her voice, not instead of it.
+  The exemplars show it: help and taunt in the same breath, or the same advice without her in it is
+  a worksheet.
+  THE TAUNTS HIT THE CIRCUMSTANCE, NEVER THE STAKES: the hour, the phone, the procrastination. Never
+  their ability, their intelligence, the exam result, or anything genuinely bad. When they are scared
+  or hurting, drop the taunt entirely — that is tender-drop, a different register, not a milder joke.
+  LAND IT LAST: a verdict, a verdict-carrying instruction, or a question she already knows the answer
+  to. Never end on the last piece of advice; an assistant ends there and she does not.
 - YOU ARE ALREADY IN A CONVERSATION. Read "recent" before you write, because most turns arrive in
   the middle of one and treating the opening of a chat as the opening of a chat is what makes her
   sound stuck. Three specific consequences:
@@ -295,11 +308,15 @@ Digests stay plain and factual. They are your private notes, not banter.
 
 ${MOM_VOICE}
 
-FINAL CHECK, before you send. Two things, in this order:
+FINAL CHECK, before you send. Three things, in this order:
 1. intent. Did they actually ask for their day to be arranged? If not, it is "chat" and plan must
    be null, no matter how much sense a schedule would make. A reply they did not ask for is worse
    than a useless one. Typing something does not mean "plan my day": only an absent NOTE does.
-2. voice. Does it sound like her, and does every field avoid the banned words? Fix intent first.
+2. voice, concretely: COULD AN ASSISTANT HAVE WRITTEN THIS LINE? If yes it is wrong, whatever else it
+   gets right. Check once and send — do not draft alternatives, this model reasons inside a token
+   budget and iterating until satisfied returns no answer at all.
+3. does it carry a mum move? If the reply is only information it is not finished. Then check every
+   field against the banned words. Fix intent first.
 
 The INPUT is anonymized: do not ask for or invent an email address or a birth year. The only name
 you ever know is CONTEXT.nickname, which they handed you on purpose.
@@ -443,7 +460,7 @@ Output raw JSON only, no markdown fences, no extra text.`;
  * and the retry was told its JSON was invalid — so it sent another chat, and the turn fell through
  * to the template planner. Saying "you owe me a plan" is a different instruction and it works.
  */
-export type RepairNeed = 'plan' | 'advice' | 'shape' | 'repeat';
+export type RepairNeed = 'plan' | 'advice' | 'shape' | 'repeat' | 'register';
 
 /**
  * Reduce a reply to the words that carry it, so two lines can be compared without punctuation,
@@ -518,6 +535,40 @@ function sameSentenceAgain(a: string, b: string): boolean {
 	return ratio > 0.85 && ratio < 1.2;
 }
 
+/** Significant words in order, which is what a repeat is actually a repeat of. */
+function wordRun(text: string): string[] {
+	return bare(text)
+		.split(' ')
+		.filter((w) => w.length > 3 && !FILLER.has(w));
+}
+
+/**
+ * Whether a reply opens by re-quoting the one before it.
+ *
+ * The size comparison in `sameSentenceAgain` has a deliberate gap, for callbacks that add something:
+ * a line restated and then built on is allowed through. But that gap also lets a reply quote her
+ * own previous sentence and tack a clause onto the end, and a live run did exactly that — the same
+ * opening twice in a row, the second one 35% longer, which read as distinct to the log and was not
+ * distinct to the person reading it.
+ *
+ * This compares the longest shared opening run of significant words, in order, so a leading greeting
+ * cannot hide it ("hey, i'm fine" is three words that say nothing; the giveaway is the run after
+ * them). Order matters: an allusion rewords the thought and breaks the run, which is why "still
+ * saying the gym is optional" is allowed to answer "the gym is optional, love, you have said so all
+ * week".
+ */
+function sameOpeningAgain(a: string, b: string): boolean {
+	const now = wordRun(a);
+	const before = wordRun(b);
+	const shorter = Math.min(now.length, before.length);
+	if (shorter < 4) return false;
+	let shared = 0;
+	while (shared < shorter && now[shared] === before[shared]) shared++;
+	// four words of identical opening is already a formula, and it has to account for the reply it is
+	// being compared against rather than merely existing in both.
+	return shared >= 4 && shared / shorter >= 0.6;
+}
+
 /**
  * The earlier reply this one repeats, if any.
  *
@@ -536,9 +587,70 @@ export function findRepeatedReply(advice: string, recent: { role: string; text: 
 	for (let i = recent.length - 1; i >= 0; i--) {
 		const m = recent[i]!;
 		if (m.role !== 'mom') continue;
-		return sameSentenceAgain(advice, m.text) ? m.text : null;
+		return sameSentenceAgain(advice, m.text) || sameOpeningAgain(advice, m.text) ? m.text : null;
 	}
 	return null;
+}
+
+/**
+ * How the finished reply sounds, not what it says.
+ *
+ * Two shapes, both taken straight from replies that shipped looking correct and reading like a
+ * worksheet: "start with the hardest chapter, then review the rest, keep your phone off, and take a
+ * walk every 45 minutes", and a reply that ends "do you want to set a short break after each hour?"
+ * — four instructions and a soft tail, from a mother to her child.
+ *
+ * Deliberately narrow. It counts instructions rather than judging tone, because a count is
+ * checkable and taste is not, and it reads the ending rather than the whole reply so it cannot fire
+ * on a long reply that simply happens to end well.
+ */
+const SOFT_TAIL =
+	/\b(do you want|would you like|shall i|should i|can i|let me know|is there anything|if you want|want me to)\b[^.!?]*[.!?]?\s*$/i;
+
+/**
+ * Verbs that open a command. Deliberately not "do": "do you want" is a service question, and the
+ * soft-tail check already owns that shape.
+ */
+const IMPERATIVE = new Set([
+	'go', 'eat', 'sleep', 'drink', 'close', 'put', 'keep', 'take', 'start', 'review', 'skim',
+	'read', 'set', 'open', 'leave', 'try', 'pick', 'finish', 'get', 'pack', 'turn', 'focus',
+	'plan', 'aim', 'stop', 'call', 'text', 'write', 'pull', 'shut', 'brew', 'lock', 'charge',
+	// the ones this app actually hears, and the ones the first list missed. "study first, then take
+	// a walk, keep a glass of water" is the reply that needed catching and only two of its three
+	// verbs were here, so the check passed it.
+	'study', 'revise', 'practice', 'answer', 'check', 'ask', 'wake', 'shower', 'change', 'move',
+	'book', 'submit', 'hydrate', 'rest', 'cram', 'nap', 'stretch', 'screen'
+]);
+
+/**
+ * How many separate orders this reply gives.
+ *
+ * Counts command segments rather than sentences, because the real failure buries three instructions
+ * inside one sentence: "focus on the toughest chapter first, then skim the rest" is two orders and
+ * reads as one paragraph to anything counting sentences. Splitting on the joins that separate orders
+ * is what makes the count match what a reader experiences.
+ */
+function countInstructions(reply: string): number {
+	const segments = reply.split(/[.!?\n;]|\s+then\s+|\s+and then\s+|\s+after that\s+|\s+next\s+/i);
+	let n = 0;
+	for (const raw of segments) {
+		const seg = raw.trim();
+		if (!seg) continue;
+		const head = seg.split(/[,]/)[0]!.trim();
+		const first = head.split(/\s+/)[0]!.toLowerCase().replace(/[^a-z]/g, '');
+		if (IMPERATIVE.has(first)) n++;
+	}
+	return n;
+}
+
+export function findSoftRegister(advice: string): string | null {
+	const text = advice.trim();
+	if (text.length < 12) return null;
+	const bad: string[] = [];
+	const instructions = countInstructions(text);
+	if (instructions > 2) bad.push(`${instructions} instructions in one reply (max 2)`);
+	if (SOFT_TAIL.test(text)) bad.push('it ends by asking whether they want something');
+	return bad.length > 0 ? bad.join('; ') : null;
 }
 
 export function buildRepairMessages(
@@ -563,7 +675,9 @@ export function buildRepairMessages(
 				? `You declared chat but wrote no reply. Return the envelope again with "advice" set to what you would actually say to them. Use this shape:\n${skeleton}`
 				: need === 'repeat'
 					? `You already said this, word for word, earlier in this conversation, and they will notice. Return the envelope again with "advice" set to the same warmth in completely different words: a different sentence, not a reworded version of the one below. Do not reuse any line from the examples in your instructions either, and do not ask a question you have already asked. Use this shape:\n${skeleton}`
-					: `Return one JSON object and nothing else. No preamble, no code fence, no explanation after it. Use this shape:\n${skeleton}`;
+					: need === 'register'
+						? `Your reply was correct and it read like a worksheet. Return the envelope again with "advice" set to what a mother would actually say, and fix this: ${error.slice(0, 200)}. Pick ONE order and give it, slip in the taunt about the hour or the phone or the timing of the confession, and end on a verdict or an instruction — never by asking whether they want something. Two instructions at most. Shorter, warmer, more certain. Use this shape:\n${skeleton}`
+						: `Return one JSON object and nothing else. No preamble, no code fence, no explanation after it. Use this shape:\n${skeleton}`;
 	return [
 		...messages,
 		{ role: 'assistant', content: assistantReply.slice(0, 4000) },

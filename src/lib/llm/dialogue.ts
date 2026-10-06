@@ -58,7 +58,7 @@ export const MOVES: MoveDef[] = [
 	{ id: 'interrogation', trigger: 'they mention going out, seeing someone, or being busy' },
 	{ id: 'deflect-to-care', trigger: 'they complain about something dull, and she hands them something better' },
 	{ id: 'receipt-callback', trigger: 'they promise something they promised last time too' },
-	{ id: 'care-question', trigger: 'any message at all, and food or sleep has not come up' },
+	{ id: 'care-question', trigger: 'the moment itself points at food or sleep: a late hour, a long study stretch, an empty stomach they mentioned' },
 	{ id: 'sass', trigger: 'they say something small and clever, and she gives it back' },
 	{ id: 'one-word', trigger: 'the moment only needs one word, and the word does the work' },
 	{ id: 'playful-threat', trigger: 'light topics only: bedtime, the phone, food. Never for real failures' },
@@ -259,6 +259,40 @@ export const DIALOGUE: DialoguePair[] = [
 		user: 'deadline tomorrow and I have barely started',
 		mom: 'then you eat first, thirty minutes, and I will help you cut the list. eat. now.',
 		move: 'care-question',
+		register: 'en'
+	},
+
+	// Stacked moves: sass and help in the same breath.
+	//
+	// Every other pair in this file teaches one move in isolation, which is how she came to answer
+	// "i have my maths exam tomorrow, any tips?" with flawless, motherless advice: review the shaky
+	// chapters, try a practice set, keep water nearby. Correct on every point, and not one line a
+	// mother would say. A real mum does not choose between teasing them and helping them, she opens
+	// with one and lands the other in the same sentence. These are the examples that show that, and
+	// they are deliberately the situations where a study coach's instinct is strongest.
+	{
+		user: 'i have my maths exam tomorrow, any tips?',
+		mom: 'maths tomorrow and you are telling me at 10pm. bold. okay — shaky chapters first, phone in the bag, water on the desk. go.',
+		move: 'sass',
+		register: 'en'
+	},
+	{
+		user: 'should i keep studying or just sleep',
+		mom: 'sleep. you will remember more of it rested than you will at 2am, and we both know it.',
+		move: 'mom-logic',
+		register: 'en'
+	},
+	{
+		user: 'how do i focus better',
+		mom: 'you focus fine. it is the phone that does not. drawer first, then chapters.',
+		move: 'sass',
+		register: 'en'
+	},
+	{
+		user: 'im nervous about tomorrow',
+		// no taunt, and that is the point of this one: scared gets tender-drop, not a milder joke
+		mom: 'you have prepared for this all term. chai, early night, and go in steady. I will be here after.',
+		move: 'tender-drop',
 		register: 'en'
 	},
 	{
@@ -674,6 +708,7 @@ export function polishAdvice(advice: string | null): string | null {
 	let out = advice.trim();
 	for (const re of BANNED_OPENERS) out = out.replace(re, '');
 	for (const re of BANNED_SIGN_OFFS) out = out.replace(re, '');
+	out = trimToHerOrders(out);
 	// the em dash is here because "It sounds like — X" leaves one dangling at the front, and a reply
 	// that opens on a dash reads as a rendering fault
 	out = out
@@ -685,5 +720,164 @@ export function polishAdvice(advice: string | null): string | null {
 	if (!/[.!?)]$/.test(out)) out += '.';
 	// her casing is the voice. "ha." opening in lowercase is deliberate, and capitalising it to
 	// "Ha." made every reply read like the same well-mannered assistant
+	return out;
+}
+
+/**
+ * Verbs that open an order. Kept beside the other deterministic cuts because that is what this is: a
+ * cut at a known boundary, not a rewrite.
+ */
+const ORDER_VERBS = new Set([
+	'go', 'eat', 'sleep', 'drink', 'close', 'put', 'keep', 'take', 'start', 'review', 'skim',
+	'read', 'set', 'open', 'leave', 'try', 'pick', 'finish', 'get', 'pack', 'turn', 'focus',
+	'plan', 'aim', 'stop', 'call', 'text', 'write', 'pull', 'shut', 'brew', 'charge',
+	'study', 'revise', 'practice', 'answer', 'check', 'ask', 'wake', 'shower', 'change', 'move',
+	'book', 'submit', 'hydrate', 'rest', 'cram', 'nap', 'stretch'
+]);
+
+/** One clause, with whatever separated it from the next. */
+interface Clause {
+	text: string;
+	/** The punctuation or joiner that followed it: a terminator ends the reply, a comma does not. */
+	after: string;
+}
+
+/**
+ * Break a reply into clauses at the points where a new order can start.
+ *
+ * Sentence splitting is not enough: "maths tomorrow, start with the toughest chapter, then do a quick
+ * recap of the easy ones" is one sentence holding three orders, and treating it as one thing is how
+ * a four-instruction reply walked past a sentence-level check.
+ */
+function clauses(advice: string): Clause[] {
+	const parts = advice.split(
+		/([.!?;,]|\s+then\s+|\s+and then\s+|\s+after that\s+|\s+next\s+)/i
+	);
+	const out: Clause[] = [];
+	for (let i = 0; i < parts.length; i += 2) {
+		const text = (parts[i] ?? '').trim();
+		const after = (parts[i + 1] ?? '').trim();
+		// a joiner with empty text either side is an artefact of splitting on both it and the comma
+		// before it ("chapters, then review" splits into text, comma, empty, then, text). The joiner
+		// still belongs to the clause in front of it, so it is folded into that clause's delimiter.
+		if (!text) {
+			const previous = out[out.length - 1];
+			if (previous) previous.after = `${previous.after} ${after}`.trim();
+			continue;
+		}
+		out.push({ text, after });
+	}
+	return out;
+}
+
+/** True when this clause is an order rather than talk: it opens with a command verb. */
+function isOrderClause(c: Clause): boolean {
+	// "and finish with a short walk" is an order. Looking only at the first word misses it, because
+	// the first word is the joiner.
+	const first = c.text
+		.replace(/^(?:and|then|also|so|now|and then|ok|okay|right)\b[\s,]*/i, '')
+		.split(/\s+/)[0]!
+		.toLowerCase()
+		.replace(/[^a-z]/g, '');
+	return ORDER_VERBS.has(first);
+}
+
+/** A reply that ends by offering a service. She declares; she does not take requests. */
+const SERVICE_TAIL =
+	/\b(do you want|would you like|shall i|should i|can i|let me know|is there anything|if you want|want me to)\b[^.!?]*\??\s*$/i;
+
+/**
+ * Keep the first two orders and drop the surplus, for free.
+ *
+ * A live reply: "maths tomorrow, start with the toughest chapter, then do a quick recap of the easy
+ * ones. keep your phone off while you're at the desk, and finish with a short walk to stretch."
+ * Four orders, no mother in it, and every prompt rule against it was already in place. Asking the
+ * model again for a shorter answer does work, and costs three to six more seconds of the student's
+ * wait, which is the one thing this app is trying not to spend. Cutting the surplus costs nothing
+ * and cannot come back wrong, so it is done here instead.
+ *
+ * What survives: her opening stance, the first two orders, and a real closing question — asking one
+ * thing back is worth more than a third piece of advice. What goes: the rest, and a service offer.
+ */
+function trimToHerOrders(advice: string): string {
+	const parts = clauses(advice);
+	if (parts.length === 0) return advice;
+
+	const kept: Clause[] = [];
+	let orders = 0;
+	let dropped = 0;
+
+	for (const c of parts) {
+		const order = isOrderClause(c);
+		if (order && orders >= 2) {
+			dropped++;
+			continue;
+		}
+		if (order) orders++;
+		kept.push(c);
+	}
+
+	// A trailing service offer is cut, and it is the last clause so nothing follows it. Checked before
+	// the question rescue, because "do you want to set a short break?" is both a question and a
+	// service offer and only the second reading should keep it.
+	const last = kept[kept.length - 1];
+	if (last && SERVICE_TAIL.test(last.text)) {
+		kept.pop();
+		dropped++;
+	}
+
+	/**
+	 * Her closing question goes back on the end, if the cut stranded it.
+	 *
+	 * The prompt asks her to answer and then ask one thing back, and that is the most characteristic
+	 * thing about how she talks. It is also the easiest thing for this cut to destroy by accident,
+	 * because a question is not an order and so is never counted against the two — which means it can
+	 * be left stranded in the middle of a reply whose tail was cut. Read from `parts` rather than
+	 * `kept`, and from the end rather than the front, so it is the closing question being rescued and
+	 * not some question from earlier in the reply.
+	 *
+	 * A service offer is excluded even though it is also a question: "do you want a short break?" is
+	 * the chatbot register, and cutting that one is the point of the check above.
+	 */
+	const question = [...parts]
+		.reverse()
+		.find((c) => /\?$/.test(c.after.trim()) && !isOrderClause(c) && !SERVICE_TAIL.test(c.text));
+	if (question && !kept.some((c) => c.text === question.text)) {
+		kept.push(question);
+		dropped++;
+	}
+
+	if (dropped === 0) return advice;
+
+	// Reassemble from the original delimiters rather than joining with spaces, which is what turned
+	// the first attempt into "ha maths tomorrow start with the toughest chapter" — a reply with the
+	// punctuation taken out reads like a transcript, not like a person.
+	/**
+ * Put the surviving clauses back together, with punctuation intact.
+ *
+ * Each clause carries the delimiter that followed it, and that delimiter is reproduced: a full stop
+ * closes a sentence, a comma keeps a run together. Rejoining with plain spaces, which is what the
+ * first attempt did, produced "maths tomorrow start with the toughest chapter do a quick recap" —
+ * a transcript with the punctuation gone, which reads as nothing like a person.
+ */
+	let out = '';
+	kept.forEach((c, i) => {
+		const last = i === kept.length - 1;
+		out += (i > 0 ? ' ' : '') + c.text;
+		if (last) return;
+		// A full stop closes a sentence. A comma or a "then" joiner does not, and restoring those
+		// verbatim is what lost a sentence boundary twice: "keep your phone off" ended up carrying the
+		// full stop from the clause that followed it and read as "…easy ones.keep your phone off", and
+		// the joiner case read "…first then skim the rest" with the comma dropped. A run of orders is
+		// still a run, joined by commas, exactly as her own exemplars are written.
+		if (/^[.!?]$/.test(c.after)) out += c.after;
+		else out += ',';
+	});
+	out = out.replace(/,\s*([.!?])/g, '$1').replace(/[,;]\s*$/, '').replace(/\s{2,}/g, ' ').trim();
+	if (!out) return advice;
+	// The rescued question keeps its question mark. Forcing a full stop on the end turned "which
+	// chapter is the hard one?" into a flat statement, which is the opposite of the point: a mum
+	// asking something back is asking, and a reply that has lost its question reads like a note.
+	if (!/[.!?]$/.test(out)) out += '.';
 	return out;
 }

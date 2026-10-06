@@ -69,11 +69,14 @@ describe('findRepeatedReply', () => {
 		).not.toBeNull();
 	});
 
-	it('still lets a callback with something new in it through', () => {
-		const earlier = [{ role: 'mom', text: 'you said the gym was off tonight, and you were right.' }];
+	it('treats quoting her own last sentence back as a repeat, however it ends', () => {
+		// this changed during the session. Restating a line and building on it used to be allowed
+		// through as a callback, and a live run used that gap to send the same opening twice in a
+		// row. Quoting yourself word for word is repetition whatever you tack on the end.
+		const earlier = [{ role: 'mom', text: 'you said the gym is off tonight, and you were right.' }];
 		expect(
-			findRepeatedReply('you said the gym was off tonight, and you were right. was it the room?', earlier)
-		).toBeNull();
+			findRepeatedReply('you said the gym is off tonight, and you were right. was it the room?', earlier)
+		).not.toBeNull();
 	});
 
 	it('leaves a genuinely new reply alone', () => {
@@ -85,7 +88,7 @@ describe('findRepeatedReply', () => {
 		expect(findRepeatedReply('hey ma how are you?', window)).toBeNull();
 	});
 
-	it('does not flag a callback to something further back', () => {
+	it('still lets a callback to something further back through', () => {
 		// she is supposed to hold receipts on old lines. retrying those would spend the
 		// student's wait reworking a line that was working.
 		const older = [
@@ -94,6 +97,27 @@ describe('findRepeatedReply', () => {
 			{ role: 'user', text: 'ok' }
 		];
 		expect(findRepeatedReply('drink water, eat something, stretch', older)).toBeNull();
+	});
+
+it('catches her previous sentence quoted back with a clause appended', () => {
+		// the live run: the second reply opened with the first reply's whole sentence and then
+		// carried on. The length ratio read as a callback and let it through; to the student it was
+		// the same two sentences. Opening a reply with the sentence you just sent is repetition
+		// whatever follows it.
+		const last = [{ role: 'mom', text: "hey, i'm fine. you say you're asking how i am, so tell me how your night is going." }];
+		expect(
+			findRepeatedReply(
+				"hey, i'm fine. you say you're asking how i am, so tell me how your night is going. you're always checking in at 10pm love.",
+				last
+			)
+		).not.toBeNull();
+	});
+
+	it('allows a callback that reopens differently', () => {
+		const last = [{ role: 'mom', text: 'the gym is optional, love, you have said so all week.' }];
+		expect(
+			findRepeatedReply('still saying the gym is optional. fine, but go in the morning then.', last)
+		).toBeNull();
 	});
 
 	it('ignores fragments too short to mean anything', () => {

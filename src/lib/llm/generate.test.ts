@@ -59,8 +59,7 @@ function context(): ContextPayload {
 		today: today(),
 		prior_plan: null,
 		notes_today: [],
-		recent: [],
-		older_digests: []
+		conversation: { recent: [], older_digests: [], to_digest: [] }
 	} as unknown as ContextPayload;
 }
 
@@ -287,6 +286,129 @@ describe('the routing call running beside the main one', () => {
 			expect(res.output).toBeNull();
 		} finally {
 			globalThis.fetch = original;
+		}
+	});
+});
+
+describe('how many round trips a turn is allowed to spend', () => {
+	/**
+	 * Counts one-shot calls, ignoring the classifier.
+	 *
+	 * The classifier runs in parallel and is capped by the routing grace, so it is not on the critical
+	 * path in the way these are.
+	 */
+	function oneShotCounter(...contents: string[]) {
+		const original = globalThis.fetch;
+		let oneShots = 0;
+		let classifiers = 0;
+		globalThis.fetch = (async (_url: unknown, init: { body?: string } | undefined) => {
+			const body = JSON.parse(init?.body ?? '{}');
+			const isClassifier = Array.isArray(body.messages) && /you decide one thing/i.test(body.messages[0]?.content ?? '');
+			if (isClassifier) {
+				classifiers += 1;
+				return new Response(JSON.stringify({ choices: [{ message: { content: '{"intent":"chat"}' } }] }), {
+					status: 200,
+					headers: { 'Content-Type': 'application/json' }
+				});
+			}
+			oneShots += 1;
+			const content = contents[Math.min(oneShots - 1, contents.length - 1)] ?? '';
+			return new Response(JSON.stringify({ choices: [{ message: { content } }] }), {
+				status: 200,
+				headers: { 'Content-Type': 'application/json' }
+			});
+		}) as typeof fetch;
+		return {
+			restore: () => {
+				globalThis.fetch = original;
+			},
+			oneShots: () => oneShots,
+			classifiers: () => classifiers
+		};
+	}
+
+	const chatEnvelope = (advice: string) =>
+		JSON.stringify({ intent: 'chat', understanding: null, advice, plan: null, handoff: null, digest: [] });
+
+	it('spends nothing extra on a checklist, because the surplus is cut in code', async () => {
+		// this was the expensive one. A four-instruction reply used to be fixed by asking the model
+		// again, which is three to six seconds of the student's wait for a shorter sentence. The
+		// surplus is cut in polishAdvice now, so the correction is free and the turn keeps its one
+		// call. This test exists to stop anyone reintroducing the round trip.
+		const counter = oneShotCounter(
+			chatEnvelope('study first, then take a short walk. keep a glass of water nearby while you read.'),
+			chatEnvelope('ha. maths tomorrow, so start with the toughest chapter. go.')
+		);
+		try {
+			const res = await generateFromNote(
+				{ note: 'maths exam tomorrow, any tips?', context: context(), profile: profile(), stats: stats(), today: today() },
+				config
+			);
+			expect(counter.oneShots()).toBe(1);
+			expect(res.advice).not.toContain('glass of water');
+		} finally {
+			counter.restore();
+		}
+	});
+
+	it('does not add a third call when the reply is both a duplicate and a checklist', async () => {
+		// the two checks used to chain, so the worst turn could spend four one-shots
+		const withHistory = () => ({
+			...context(),
+			conversation: {
+				recent: [
+					{ role: 'user', text: 'maths exam tomorrow' },
+					{ role: 'mom', text: 'study first, then take a short walk. keep a glass of water nearby while you read.' }
+				],
+				older_digests: [],
+				to_digest: []
+			}
+		} as unknown as ContextPayload);
+
+		const counter = oneShotCounter(
+			chatEnvelope('study first, then take a short walk. keep a glass of water nearby while you read.'),
+			chatEnvelope('ha. then we start with the hardest one. go.')
+		);
+		try {
+			await generateFromNote(
+				{ note: 'and what about tonight?', context: withHistory(), profile: profile(), stats: stats(), today: today() },
+				config
+			);
+			expect(counter.oneShots()).toBeLessThanOrEqual(2);
+		} finally {
+			counter.restore();
+		}
+	});
+
+	it('keeps the structural repair, which outranks both checks', async () => {
+		// a planning request that came back without blocks is the case the repair exists for: without
+		// the second asking, this turn falls through to the template planner. So the budget goes here
+		// first and the tone is never looked at.
+		const counter = oneShotCounter(
+			JSON.stringify({ intent: 'plan', understanding: null, advice: null, plan: null, handoff: null, digest: [] }),
+			JSON.stringify({
+				intent: 'plan',
+				understanding: null,
+				advice: 'eat, then bed. go.',
+				plan: {
+					summary: 'eat, then bed',
+					flags: [],
+					blocks: [{ start: '20:00', end: '21:00', action: 'eat_meal', detail: 'eat dinner', why: 'mess closes at 9' }]
+				},
+				handoff: null,
+				digest: []
+			})
+		);
+		try {
+			const res = await generateFromNote(
+				// content free, so wantsPlan is true and a plan is genuinely owed
+				{ note: null, context: context(), profile: profile(), stats: stats(), today: today() },
+				config
+			);
+			expect(res.output).not.toBeNull();
+			expect(counter.oneShots()).toBe(2);
+		} finally {
+			counter.restore();
 		}
 	});
 });

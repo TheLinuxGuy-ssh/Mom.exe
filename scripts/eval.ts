@@ -188,6 +188,34 @@ async function evalPlans(): Promise<void> {
 	const valid = rows.filter((r) => r.valid).length;
 	console.log(`\nfirst-shot valid: ${first}/${rows.length}`);
 	console.log(`valid after one repair retry (what the app does): ${valid}/${rows.length}`);
+
+	/**
+	 * Flag provider congestion, because it looks exactly like a prompt regression.
+	 *
+	 * Three consecutive runs of this harness read 5/8, 4/8 and 5/8 while a single diagnostic call
+	 * in the same window came back valid every time (finish_reason: stop, plan present, 802
+	 * completion tokens). The difference was latency: the INVALID rows are the slow ones, 18s to
+	 * 53s, and NVIDIA's shared free tier is where those seconds go. A reasoning model given a long
+	 * prompt and a congested queue will sometimes spend its budget before it reaches content, and
+	 * the harness cannot tell that apart from a bad envelope.
+	 *
+	 * So: when validity drops, check this line before touching the prompt. `npm run eval` on the free
+	 * tier measures the weather as much as it measures the model.
+	 */
+	const slow = rows.filter((r) => r.latency_ms > 20_000).length;
+	if (valid < rows.length) {
+		console.log(
+			slow > 0
+				? `note: ${slow}/${rows.length} rows took over 20s. NVIDIA's free tier is queueing; treat this run as a provider reading, not a prompt verdict.`
+				: 'note: failures were fast, so this one is worth reading as a prompt result.'
+		);
+	}
+	console.log('median latency: ' + Math.round(median(rows.map((r) => r.latency_ms))) + 'ms');
+}
+
+function median(xs: number[]): number {
+	const s = [...xs].sort((a, b) => a - b);
+	return s.length % 2 ? s[(s.length - 1) / 2]! : (s[s.length / 2 - 1]! + s[s.length / 2]!) / 2;
 }
 
 function freshContextFor(key: string, tz: string) {

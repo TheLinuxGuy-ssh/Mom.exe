@@ -21,6 +21,7 @@ import {
 	buildOneShotMessages,
 	buildRepairMessages,
 	findRepeatedReply,
+	findSoftRegister,
 	parseClassification
 } from './prompt';
 import { tryParseJson } from './parse';
@@ -431,6 +432,9 @@ async function answer(
 		 */
 		const unreadable = parsed.issue === 'no json envelope found';
 		const needsRepair = (parsed.intent === 'plan' && !parsed.plan) || unreadable;
+		// the turn's one corrective round trip, spent here if the envelope needed saving. An
+		// unreadable answer is the worst thing that can happen to a turn, so it takes the budget.
+		const repaired = needsRepair;
 		if (needsRepair) {
 			// be specific about the debt. "that reply was invalid" leaves the model guessing, and a
 			// first greeting answered with small talk then failed the retry exactly like this
@@ -447,6 +451,15 @@ async function answer(
 				parsed.issue ?? 'invalid json',
 				need
 			);
+			// A structural repair spends the turn's only corrective round trip, which means the
+			// register checks below never get to run. Rather than buy a third call for them, this
+			// repair is told to land the voice too: the same call that fixes the shape fixes the tone,
+			// for a few hundred characters in a prompt that is already being sent. A live turn returned
+			// "study first, then take a short walk... keep a glass of water nearby" and the checklist
+			// check that would have caught it was skipped because the envelope had needed saving first.
+			retryMessages[retryMessages.length - 1]!.content +=
+				'\nAnd while you are writing it again: one order, not a list, and land a verdict or an instruction at the end. ' +
+				'Say it as her, not as something an assistant could have sent.';
 			text = await ask(config, retryMessages, { temperature: 0.2, authToken: args.authToken });
 			lastRaw = text;
 			lastProse = proseOnly(text);
@@ -460,26 +473,34 @@ async function answer(
 		}
 
 		/**
-		 * The mechanical half of the repetition fix, and the half that does not depend on the model
-		 * taking an instruction at face value.
+		 * One corrective round trip for the whole turn, whichever check fires first.
 		 *
-		 * She answered "hey ma how are you?" with the same "how did you sleep" line twice in one
-		 * sitting, because the corpus holds that sentence as the canonical greeting and a prompt rule
-		 * loses to an in-context example. The prompt now varies the exemplars and says outright that
-		 * they teach the move and not the words, but that is still a request. This is a check: if the
-		 * finished advice is the same sentence she already said this conversation, ask for it again,
-		 * once, naming the line.
+		 * Two checks, because they catch different failures: `findRepeatedReply` catches a reply that
+		 * quotes her last one, and `findSoftRegister` catches a reply that is a worksheet — four
+		 * instructions, or an ending that offers a service. Both were live bugs and both needed a
+		 * second asking, because an instruction does not beat a shape.
 		 *
-		 * One retry, not a loop. A model that cannot be made to vary on the second asking is going to
-		 * waste the student's wait on a third round trip, and a reply that repeats is still a reply.
+		 * They used to be two separate retries, chained after the structural repair, so a turn could
+		 * spend four round trips: the original, a repair, and then both corrections. Four calls is
+		 * most of a student's wait spent on the second attempt at being understood.
+		 *
+		 * So the turn gets a budget of one corrective call, and whoever spends it first keeps it. A
+		 * broken envelope spends it first because there is nothing to show without one. After that
+		 * the checks still run and are still logged, they just do not get a third round trip: a
+		 * duplicate loses to an unreadable answer, and both lose to the student's patience.
 		 */
-		const repeated = advice ? findRepeatedReply(advice, args.context.conversation.recent) : null;
-		if (repeated) {
+		const recentWindow = args.context.conversation?.recent ?? [];
+		// `conversation` is optional on ContextPayload and a payload built without one would throw
+		// here, which lands in the catch below and quietly costs the student their model's answer.
+		// The checks are an improvement, not a dependency.
+		const repeated = advice ? findRepeatedReply(advice, recentWindow) : null;
+		const soft = !repeated && parsed.intent === 'chat' && advice ? findSoftRegister(advice) : null;
+		if (!repaired && (repeated || soft)) {
 			const retryMessages = buildRepairMessages(
 				messages,
 				text,
-				`you already said: ${repeated.slice(0, 200)}`,
-				'repeat'
+				repeated ? `you already said: ${repeated.slice(0, 200)}` : (soft as string),
+				repeated ? 'repeat' : 'register'
 			);
 			text = await ask(config, retryMessages, { temperature: 0.8, authToken: args.authToken });
 			lastRaw = text;

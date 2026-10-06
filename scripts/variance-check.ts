@@ -10,6 +10,8 @@
  *   npx tsx scripts/variance-check.ts
  *
  * NIM only. Tests do not run on Groq.
+ *
+ * Pass a note to check a different one: npx tsx scripts/variance-check.ts "your note here"
  */
 import { PERSONAS } from '../dev-fixtures/personas';
 import { generateFromNote } from '../src/lib/llm/generate';
@@ -52,7 +54,7 @@ const { payload } = buildContext(built.profile, checkins, [], today, now, null, 
 const bare = (s: string) =>
 	s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
 
-const ASK = 'hey ma how are you?';
+const ASK = process.argv[2] ?? 'hey ma how are you?';
 
 (async () => {
 	console.log(`provider: ${provider.name}  model: ${provider.model}`);
