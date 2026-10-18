@@ -150,7 +150,7 @@
 				<input
 					type="email"
 					class="field"
-					placeholder="you@hostel.life"
+					placeholder="you@adulting.life"
 					bind:value={email}
 					onkeydown={(e) => e.key === 'Enter' && void start()}
 				/>

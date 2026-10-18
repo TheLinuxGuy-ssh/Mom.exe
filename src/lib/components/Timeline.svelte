@@ -140,8 +140,8 @@
 				<div>
 					<p class="font-black text-sm">Worth talking to someone</p>
 					<p class="text-sm font-semibold mt-1 leading-snug">
-						Sleep and meals have been rough for a while and that is a lot to carry alone. A campus
-						counselor or doctor can actually help. Wellness app, not a medical one.
+						Sleep and meals have been rough for a while and that is a lot to carry alone. A counselor,
+						therapist or doctor can actually help. Wellness app, not a medical one.
 					</p>
 				</div>
 			</div>

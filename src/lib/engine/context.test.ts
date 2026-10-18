@@ -18,6 +18,7 @@ function at(tz: string, iso: string): Date {
 const profile: Profile = {
 	id: 'u1',
 	display_name: 'Rahul Sharma',
+	situation: 'student_hostel',
 	birth_year: 2005,
 	height_cm: 170,
 	weight_kg: 60,

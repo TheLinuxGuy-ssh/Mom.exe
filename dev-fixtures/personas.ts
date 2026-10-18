@@ -13,6 +13,7 @@ interface Persona {
 function baseProfile(over: Partial<ProfileInput> = {}): ProfileInput {
 	return {
 		display_name: 'demo student',
+		situation: 'student_hostel',
 		birth_year: 2004,
 		height_cm: null,
 		weight_kg: null,

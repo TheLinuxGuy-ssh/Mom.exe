@@ -7,6 +7,7 @@ import type { TodayInfo } from '../engine/context';
 const profile: Profile = {
 	id: 'u1',
 	display_name: 'test',
+		situation: 'student_hostel',
 	birth_year: 2004,
 	height_cm: null,
 	weight_kg: null,

@@ -27,6 +27,7 @@ const TZ = 'Asia/Kolkata';
 const profile: Profile = {
 	id: 'u1',
 	display_name: 'beta',
+	situation: 'student_hostel',
 	birth_year: 2005,
 	height_cm: null,
 	weight_cm: null,
@@ -374,7 +375,10 @@ function llmConfig(): LLMConfig {
 		// `/chat/completions` unless the url already ends in it, and a host-only base produced a 404
 		url: provider.url,
 		model: MODEL,
-		apiKey: provider.key
+		apiKey: provider.key,
+		// NIM's free tier queues 30-60s under load tonight; the app keeps its own 30s default,
+		// the harness waits longer so a queued model does not read as a broken pipeline
+		timeoutMs: 90000
 	};
 }
 

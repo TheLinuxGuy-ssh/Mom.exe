@@ -15,6 +15,7 @@
     "eval": "tsx scripts/eval.ts",
     "og": "tsx scripts/render-og.ts",
     "test:student": "tsx scripts/student-test.ts",
+    "test:abuse": "tsx scripts/abuse-test.ts",
     "check-model": "tsx scripts/check-nim.ts"
   },
   "devDependencies": {

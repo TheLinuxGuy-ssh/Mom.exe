@@ -12,6 +12,7 @@ function profile(): Profile {
 	return {
 		id: 'u1',
 		display_name: 'beta',
+		situation: 'student_hostel',
 		birth_year: 2005,
 		height_cm: null,
 		weight_kg: null,

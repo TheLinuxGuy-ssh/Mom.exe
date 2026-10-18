@@ -146,7 +146,7 @@
 				<label class="text-xs font-black uppercase tracking-widest text-brown space-y-1">target wake
 					<input type="time" class="field" bind:value={profile.target_wake} />
 				</label>
-				<label class="text-xs font-black uppercase tracking-widest text-brown space-y-1">class starts
+				<label class="text-xs font-black uppercase tracking-widest text-brown space-y-1">day starts (class / work)
 					<input type="time" class="field" bind:value={profile.class_start} />
 				</label>
 				<label class="text-xs font-black uppercase tracking-widest text-brown space-y-1">caffeine
@@ -186,7 +186,7 @@
 			{/each}
 		</div>
 		<p class="text-[11px] font-semibold text-mute">
-			These are made-up students, not anyone you know: loading one replaces this account's
+			These are made-up personas, not anyone you know: loading one replaces this account's
 			check-ins with a synthetic history, so you can judge the plans she writes without typing
 			out a week of your own. Everything after that — your notes, her replies — is yours.
 		</p>

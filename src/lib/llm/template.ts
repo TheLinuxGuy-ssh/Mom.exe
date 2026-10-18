@@ -1,4 +1,5 @@
 import type { Profile } from '../storage/types';
+import { situOf } from '../storage/types';
 import type { TodayInfo } from '../engine/context';
 import type { Stats } from '../engine/stats';
 import type { PlanOutput } from './schema';
@@ -67,6 +68,10 @@ export function templatePlan(
 	const tailShift = Math.max(0, nowMinutes + 5 - (bed - 45));
 	const tailStart = bed - 45 + tailShift;
 
+	// The stored `mess` windows are "eating windows" for everyone; only a hostel student's window
+	// is a mess canteen, and only their detail line should say "head to the mess". The timing
+	// arithmetic is identical for all seven situations.
+	const isMess = situOf(profile.situation) === 'student_hostel';
 	const messWindows: { meal: 'b' | 'l' | 'd'; window: string; eaten: boolean | null }[] = [
 		{ meal: 'b', window: profile.mess.breakfast, eaten: today.meals_so_far.b },
 		{ meal: 'l', window: profile.mess.lunch, eaten: today.meals_so_far.l },
@@ -83,7 +88,9 @@ export function templatePlan(
 				start,
 				Math.min(start + 30, we),
 				'eat_meal',
-				`Head to the mess for ${label} before the window closes at ${minToHHMM(we)}.`,
+				isMess
+					? `Head to the mess for ${label} before the window closes at ${minToHHMM(we)}.`
+					: `Get ${label} in before your window closes at ${minToHHMM(we)}.`,
 				skippedRate != null && skippedRate > 0.3 ? 'meals keep slipping this week' : 'you have not eaten this meal yet',
 				nowMinutes
 			);
@@ -103,13 +110,22 @@ export function templatePlan(
 			nowMinutes
 		);
 	} else if (today.classes.length > 0 && nowMinutes < hhmmToMin(today.classes[0].start)) {
+		// the anchor is stored as class_start, but why it exists depends on the situation: a
+		// class, a workday, or a repeating commitment for someone with no fixed start
+		const situation = situOf(profile.situation);
+		const isStudent = situation === 'student_hostel' || situation === 'student_flat' || situation === 'student_home';
+		const anchor = isStudent ? 'class' : situation === 'work_office' || situation === 'work_remote' ? 'work' : 'day';
 		pushBlock(
 			blocks,
 			Math.max(nowMinutes + 15, hhmmToMin(today.classes[0].start) - 60),
 			hhmmToMin(today.classes[0].start) - 10,
 			'study_block',
-			'Quick revision block before class starts.',
-			'class at ' + today.classes[0].start,
+			isStudent
+				? 'Quick revision block before class starts.'
+				: situation === 'work_office' || situation === 'work_remote'
+					? 'A calm run-in block before work starts.'
+					: 'A calm run-in block before the day starts.',
+			`${anchor} at ${today.classes[0].start}`,
 			nowMinutes
 		);
 	}
@@ -213,7 +229,9 @@ export function templatePlan(
 		flags.includes('persistent_late_sleep')
 			? 'Okay. Rough week of sleep, so today is about steady meals and an early, honest bedtime.'
 			: basis === 'priors'
-				? 'Fresh start. Here is your day planned around your classes, mess timings and bedtime.'
+				? situOf(profile.situation) === 'student_hostel'
+					? 'Fresh start. Here is your day planned around your classes, mess timings and bedtime.'
+					: 'Fresh start. Here is your day planned around your fixed hours, meals and bedtime.'
 				: 'Here is the rest of your day, planned around what I know about your week.';
 
 	return { summary, data_note, blocks, flags };

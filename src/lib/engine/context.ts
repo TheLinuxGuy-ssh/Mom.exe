@@ -1,4 +1,5 @@
-import type { Basis, Checkin, Followup, Plan, Profile } from '../storage/types';
+import { situOf } from '../storage/types';
+import type { Basis, Checkin, Followup, Plan, Profile, Situation } from '../storage/types';
 import { computeStats, type Stats } from './stats';
 import { ageBand, scrubText } from './scrub';
 import { disturbanceTheme } from './extract';
@@ -50,6 +51,7 @@ export interface ContextPayload {
 	weekly_summaries: string[];
 	profile_anon: {
 		age_band: string;
+		situation: Situation;
 		chronotype: string;
 		roommates: string;
 		mess: { breakfast: string; lunch: string; dinner: string };
@@ -223,6 +225,9 @@ export function buildContext(
 		weekly_summaries,
 		profile_anon: {
 			age_band: ageBand(profile.birth_year, now.getFullYear()),
+			// profiles saved before situations existed were all hostel students; defaulting here
+			// keeps their context identical to what the model used to read
+			situation: situOf(profile.situation),
 			chronotype: profile.chronotype,
 			roommates: profile.roommates,
 			mess: profile.mess,

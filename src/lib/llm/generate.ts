@@ -16,6 +16,7 @@ import {
 import { chat, LLMError } from './client';
 import { extractJsonText, salvageAdvice } from './parse';
 import { deScorekeep, deScorekeepPlan, polishAdvice } from './dialogue';
+import { cannedLine, triageNote } from './guard';
 import {
 	buildClassifyFirstMessages,
 	buildOneShotMessages,
@@ -32,7 +33,7 @@ import { intentHint, isHinglishFeeling } from '../engine/mutation';
 import { reconcileAdviceWithPlan } from '../engine/consistency';
 import { getLLMConfig } from './config';
 import type { LLMConfig } from './config';
-import { nowMinutesInTz } from '../engine/time';
+import { nowMinutesInTz, localDateInTz } from '../engine/time';
 
 export interface OneShotParsed {
 	intent: Intent;
@@ -277,6 +278,34 @@ async function ask(
 
 export async function generateFromNote(args: OneShotArgs, configOverride?: LLMConfig): Promise<OneShotResult> {
 	const config = configOverride ?? getLLMConfig();
+
+	/**
+	 * The abuse gate, first and free.
+	 *
+	 * Deterministic triage on this turn's own words, BEFORE any model call: an off-domain ask, a
+	 * probe about her construction, or an override attempt gets a canned line in her voice and
+	 * costs nothing. In direct mode (scripts, local Ollama) this is the only gate there is; in
+	 * hosted mode the edge function runs the same check again, because the client is never trusted
+	 * as an enforcement layer. Only this turn's note is scanned — one bad sentence stored as a
+	 * past message must not turn every future reply canned, which the conversation would if the
+	 * scan covered stored messages too. Old text rides with the prompt hardening instead.
+	 */
+	const verdict = triageNote(args.note);
+	if (verdict.verdict !== 'ok') {
+		const daySeed = Number(localDateInTz(args.profile.timezone, new Date()).slice(-2)) || 1;
+		return {
+			intent: 'chat',
+			understanding: null,
+			advice: cannedLine(verdict.verdict, daySeed),
+			output: null,
+			handoff: null,
+			digest: [],
+			model_id: 'guard',
+			usedTemplate: false,
+			fallbackReason: `guarded: ${verdict.verdict} (${verdict.rule}) — no model call was made`
+		};
+	}
+
 	// Always the full prompt. `preclassified` means the caller already knows the intent, so it skips
 	// the routing call below; it must never decide which prompt the answer is generated from. That
 	// conflation once sent the router prompt as the main call, so the model returned a bare

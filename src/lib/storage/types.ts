@@ -5,6 +5,29 @@ export type CaffeineHabit = 'none' | 'low' | 'high_late';
 export type Basis = 'priors' | 'partial' | 'full';
 export type CheckinSource = 'quick' | 'full' | 'note' | 'followup';
 
+/**
+ * What someone's life looks like right now, chosen at setup. It drives which onboarding
+ * questions they get, the wording of every step after it, and one line of context mom reads
+ * before she plans. It is deliberately a life-situation rather than an occupation: the same
+ * "when does food happen" step speaks to a mess canteen, a tiffin arrangement or an office
+ * lunch break depending on this answer.
+ */
+export type Situation =
+	| 'student_hostel'
+	| 'student_flat'
+	| 'student_home'
+	| 'work_office'
+	| 'work_remote'
+	| 'own_gig'
+	| 'between_things';
+
+/** Profiles stored before the field existed were all hostel students, so that is the fallback. */
+export const DEFAULT_SITUATION: Situation = 'student_hostel';
+
+export function situOf(s: Situation | null | undefined): Situation {
+	return s ?? DEFAULT_SITUATION;
+}
+
 export interface MessTimings {
 	breakfast: string;
 	lunch: string;
@@ -14,6 +37,7 @@ export interface MessTimings {
 export interface Profile {
 	id: string;
 	display_name: string;
+	situation: Situation;
 	birth_year: number | null;
 	height_cm: number | null;
 	weight_kg: number | null;
