@@ -17,7 +17,7 @@
  * "delay dinner" and "cancel study" are instructions while "drop out" and "move on" are not: none
  * of those nouns can follow the verbs where they appear in ordinary conversation.
  */
-const NOUN = String.raw`(?:it|that|this|them|those|these|my|the|a|an|dinner|lunch|breakfast|snack|tea|chai|class|classes|study|revision|gym|walk|run|exercise|sleep|nap|test|tuition|lab|lecture|seminar|assignment|homework|everything)`;
+const NOUN = String.raw`(?:it|that|this|them|those|these|my|the|a|an|dinner|lunch|breakfast|snack|tea|chai|class|classes|study|revision|gym|walk|run|exercise|sleep|nap|test|tuition|lab|lecture|seminar|assignment|homework|meeting|meetings|standup|stand-up|stand up|commute|office|everything)`;
 /** note `.source`: interpolating the RegExp itself would splice in its /pattern/flags text */
 const OBJECT = String.raw`\b${NOUN}\b`;
 

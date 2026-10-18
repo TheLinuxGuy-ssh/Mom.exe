@@ -1,4 +1,5 @@
 import type { Checkin, CheckinInput, PlanOutput, Profile, ProfileInput, Storage } from '../src/lib/storage/types';
+import { situOf } from '../src/lib/storage/types';
 import { buildTodayInfo, basisFor } from '../src/lib/engine/context';
 import { computeStats } from '../src/lib/engine/stats';
 import { hhmmToMin, localDateInTz, minToHHMM, nowMinutesInTz } from '../src/lib/engine/time';
@@ -38,7 +39,7 @@ function dateAgo(tz: string, n: number): string {
 export const PERSONAS: { key: string; label: string; build: (tz: string) => { profile: ProfileInput; checkins: CheckinInput[] } }[] = [
 	{
 		key: 'fresh',
-		label: 'Freshman (1 check-in)',
+		label: 'Fresh start (1 check-in)',
 		build: (tz) => ({
 			profile: baseProfile(),
 			checkins: [
@@ -116,6 +117,42 @@ export const PERSONAS: { key: string; label: string; build: (tz: string) => { pr
 				}
 			]
 		})
+	},
+	{
+		// a working person's demo, so the personalisation is visible end to end: the timeline
+		// calls their work 'Work' and 'Focus block', the planner speaks office hours and lunch
+		// breaks, and nothing in their plan mentions a mess or a semester.
+		key: 'nine-to-five',
+		label: 'Nine to five (10 days)',
+		build: (tz) => ({
+			profile: baseProfile({
+				display_name: 'demo worker',
+				situation: 'work_office',
+				chronotype: 'morning',
+				roommates: 'own_room',
+				caffeine: 'high_late',
+				mess: { breakfast: '08:00-09:00', lunch: '13:00-14:00', dinner: '20:00-22:00' }
+			}),
+			checkins: Array.from({ length: 10 }, (_, i) => {
+				const ago = 10 - i;
+				const rough = i === 2 || i === 7;
+				return {
+					local_date: dateAgo(tz, ago),
+					quick: rough ? 'rough' : 'okay',
+					sleep_hours: rough ? 4.8 : 6.2,
+					slept_at: rough ? '01:40' : '00:10',
+					woke_at: '07:30',
+					meals: { b: i % 3 !== 0, l: !rough, s: i % 2 === 0, d: true },
+					mood: rough ? 2 : 4,
+					notes: rough
+						? 'standup went long, head straight into meetings'
+						: i % 3 === 0
+							? 'skipped lunch again, client call over it'
+							: 'gym after work today',
+					source: 'note'
+				} satisfies CheckinInput;
+			})
+		})
 	}
 ];
 
@@ -140,7 +177,7 @@ function demoPlan(profile: Profile, now: Date): PlanOutput {
 		[510, 90, 'study_block', 'One focused block on the thing that is due. Phone in the bag.', 'you mentioned a deadline'],
 		[390, 45, 'social_time', 'Call home properly, not the two-line version.', 'you have not spoken to anyone all day'],
 		[300, 30, 'exercise', 'Walk the block. Do not negotiate with the weather.', 'you have been sitting since morning'],
-		[210, 30, 'eat_meal', 'Eat something that is not chai.', 'mess closes at ' + profile.mess.dinner.split('-')[1]],
+		[210, 30, 'eat_meal', 'Eat something that is not chai.', (situOf(profile.situation) === 'student_hostel' ? 'mess closes at ' : 'dinner window ends at ') + profile.mess.dinner.split('-')[1]],
 		[150, 10, 'hydration', 'Water, before you think you want coffee.', 'you have been running on empty'],
 		[105, 30, 'wind_down', 'Screens off, lights low. No negotiating.', 'last caffeine window shut hours ago'],
 		[60, 60, 'sleep', 'Sleep. The whole point of the day.', 'your target bed time']

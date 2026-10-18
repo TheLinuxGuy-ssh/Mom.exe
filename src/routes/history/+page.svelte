@@ -5,10 +5,11 @@
 	import ArrowLeft from 'lucide-svelte/icons/arrow-left';
 	import MessagesSquare from 'lucide-svelte/icons/messages-square';
 	import CalendarDays from 'lucide-svelte/icons/calendar-days';
-	import type { Message, Plan } from '$lib/storage/types';
+	import type { Message, Plan, Situation } from '$lib/storage/types';
 	import { getStorage } from '$lib/storage';
 	import { getSession } from '$lib/auth/session';
-	import { ACTION_LABEL, type Action } from '$lib/engine/actions';
+	import { situOf } from '$lib/storage/types';
+	import { actionLabel } from '$lib/engine/situation-words';
 	import { buildHistory, chatPreview, type ChatEntry, type HistoryEntry, type HistoryTab } from '$lib/engine/history';
 	import { splitBubbles } from '$lib/engine/bubbles';
 	import ActionIcon from '$lib/components/ActionIcon.svelte';
@@ -18,6 +19,15 @@
 	let loading = $state(true);
 	let open = $state<string | null>(null);
 	let tab = $state<HistoryTab>('all');
+
+	// Plans saved after the situation rollout carry it in their snapshot; anything older was a
+	// hostel-era plan, so the legacy default is the right read for it.
+	function situationOfPlan(p: Plan): Situation {
+		return situOf(
+			(p.context_snapshot as { profile_anon?: { situation?: Situation } } | null)?.profile_anon
+				?.situation
+		);
+	}
 
 	const TABS: { value: HistoryTab; label: string }[] = [
 		{ value: 'all', label: 'everything' },
@@ -142,7 +152,7 @@
 											<ActionIcon action={b.action} size={13} />
 										</span>
 										<span class="font-bold text-xs text-mute w-11 shrink-0">{b.start}</span>
-										<span class="font-semibold truncate">{ACTION_LABEL[b.action as Action] ?? b.action}</span>
+										<span class="font-semibold truncate">{actionLabel(b.action, situationOfPlan(p))}</span>
 										<span class="text-xs text-mute truncate hidden sm:block">{b.detail}</span>
 									</div>
 								{/each}

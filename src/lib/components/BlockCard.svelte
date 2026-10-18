@@ -1,8 +1,8 @@
 <script lang="ts">
 	import Check from 'lucide-svelte/icons/check';
 	import X from 'lucide-svelte/icons/x';
-	import type { PlanBlock } from '$lib/storage/types';
-	import { ACTION_LABEL, type Action } from '$lib/engine/actions';
+	import type { PlanBlock, Situation } from '$lib/storage/types';
+	import { actionLabel } from '$lib/engine/situation-words';
 	import ActionIcon from './ActionIcon.svelte';
 
 	let {
@@ -10,16 +10,18 @@
 		phase,
 		minutesLeft = 0,
 		mark = null,
-		onmark
+		onmark,
+		situation = undefined
 	}: {
 		block: PlanBlock;
 		phase: 'current' | 'next';
 		minutesLeft?: number;
 		mark?: 'yes' | 'no' | null;
 		onmark?: (followed: 'yes' | 'no') => void;
+		situation?: Situation;
 	} = $props();
 
-	const label = $derived(ACTION_LABEL[block.action as Action] ?? block.action);
+	const label = $derived(actionLabel(block.action, situation));
 </script>
 
 <div

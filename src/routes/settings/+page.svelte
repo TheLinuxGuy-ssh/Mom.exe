@@ -5,6 +5,8 @@
 	import Download from 'lucide-svelte/icons/download';
 	import Trash2 from 'lucide-svelte/icons/trash-2';
 	import type { Profile } from '$lib/storage/types';
+	import { situOf } from '$lib/storage/types';
+	import { DAY_FIELD } from '$lib/engine/situation-words';
 	import { getStorage } from '$lib/storage';
 	import { isValidTimezone } from '$lib/engine/time';
 	import { getSession } from '$lib/auth/session';
@@ -13,6 +15,10 @@
 	import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
 
 	let profile = $state<Profile | null>(null);
+
+	// the fixed start-of-day field reads differently for a hostel student, an office worker and
+	// somebody with nothing fixed; same stored field underneath (see situation-words).
+	const dayLabel = $derived(profile ? DAY_FIELD[situOf(profile.situation)] : 'day starts (class / work)');
 
 	// destructive actions need an explicit go-ahead, and must not be re-enterable while running
 	let seeding = $state<string | null>(null);
@@ -146,7 +152,7 @@
 				<label class="text-xs font-black uppercase tracking-widest text-brown space-y-1">target wake
 					<input type="time" class="field" bind:value={profile.target_wake} />
 				</label>
-				<label class="text-xs font-black uppercase tracking-widest text-brown space-y-1">day starts (class / work)
+				<label class="text-xs font-black uppercase tracking-widest text-brown space-y-1">{dayLabel}
 					<input type="time" class="field" bind:value={profile.class_start} />
 				</label>
 				<label class="text-xs font-black uppercase tracking-widest text-brown space-y-1">caffeine

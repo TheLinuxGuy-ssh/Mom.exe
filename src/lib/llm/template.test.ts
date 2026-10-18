@@ -91,6 +91,50 @@ describe('templatePlan', () => {
 	});
 });
 
+describe('templatePlan in the other situations', () => {
+	/**
+	 * The fallback planner has to speak whose day it is: never semester words to an office
+	 * worker, never a mess reference they have never seen, and no invented fixed anchor for
+	 * somebody who told us nothing is fixed.
+	 */
+	const workProfile: Profile = { ...profile, situation: 'work_office' };
+
+	it('writes the run-in for a workday, anchored on their work hours', () => {
+		const out = templatePlan(workProfile, stats(), today({ classes: [{ start: '09:00', end: '10:30' }] }), 8 * 60 + 20);
+		const runIn = out.blocks.find((b) => b.action === 'study_block');
+		expect(runIn?.detail).toBe('A calm run-in block before work starts.');
+		expect(runIn?.why).toBe('work at 09:00');
+	});
+
+	it('keeps the mess out of a worker\u2019s meal lines', () => {
+		const out = templatePlan(workProfile, stats(), today({ meals_so_far: { b: false, l: false, s: null, d: null } }), 13 * 60 + 50);
+		const lunch = out.blocks.find((b) => b.action === 'eat_meal');
+		expect(lunch?.detail.startsWith('Get lunch in before your window closes')).toBe(true);
+		for (const b of out.blocks) {
+			expect(b.detail.toLowerCase()).not.toContain('mess');
+			expect((b.why ?? '').toLowerCase()).not.toContain('mess');
+		}
+	});
+
+	it('does not invent a run-in block for a freelancer with nothing fixed', () => {
+		const out = templatePlan({ ...profile, situation: 'own_gig', class_start: '' }, stats(), today(), 16 * 60);
+		expect(out.blocks.find((b) => b.action === 'study_block')).toBeUndefined();
+	});
+
+	it('says the fresh-open summary in day words, not hostel words', () => {
+		// steady-sleep stats on purpose: a rough week takes the neutral summary branch before this
+		// situation branch ever runs, and that behaviour is pinned by the tests above
+		const gigs = templatePlan(
+			{ ...profile, situation: 'own_gig', class_start: '' },
+			stats({ nights_under_5h_14d: { value: 0, n: 9 }, skipped_meal_rate: { value: 0.1, n: 40 }, known_days_of_last_14: 0 }),
+			today(),
+			16 * 60
+		);
+		expect(gigs.summary).toContain('fixed hours, meals and bedtime');
+		expect(gigs.summary).not.toContain('mess');
+	});
+});
+
 describe('templatePlan late in the day', () => {
 	/**
 	 * These are the bugs that made the offline planner unusable at night, which is exactly when it

@@ -4,7 +4,7 @@
 
 <h1>Mom.exe</h1>
 
-<p><strong>Your mom, but as an executable.</strong><br>A wellness coach that plans your day around your real classes, mess timings, deadlines, and sleep.</p>
+<p><strong>Your mom, but as an executable.</strong><br>A wellness coach that plans your day around your real classes or work hours, meal timings, deadlines, and sleep.</p>
 
 <p>
   <a href="https://github.com/TheLinuxGuy-ssh/Mom.exe/actions"><img alt="Continuous integration status" src="https://img.shields.io/badge/CI-passing-22c55e?style=flat-square&labelColor=0d1117&logo=githubactions&logoColor=white"></a>
@@ -34,7 +34,7 @@
 
 ## What it is
 
-Mom.exe is a wellness coach for students who moved out of the home where somebody else used to keep track of their life. You write what is going on in your own words, and it returns a concrete plan for the rest of the day and night.
+Mom.exe is a wellness coach for anyone adulting on their own — hostel, flat, family home, office, freelance or in between. You write what is going on in your own words, and it returns a concrete plan for the rest of the day and night.
 
 It is not a habit tracker with a streak counter. Skip breakfast four days running and the app neither scolds you nor resets anything, because you already know.
 
@@ -43,7 +43,7 @@ It is not a habit tracker with a streak counter. Skip breakfast four days runnin
 
 ## Why it exists
 
-Students leaving home lose the one scheduler that ever worked: a person who knew their mess timings, their class schedule, and what time they actually needed to be in bed. Every replacement is either a manual calendar or a streaks app that makes an already bad week visibly worse.
+Running your own days means losing the one scheduler that ever worked: a person who knew your meal timings, your classes or work hours, and what time you actually needed to be in bed. Every replacement is either a manual calendar or a streaks app that makes an already bad week visibly worse.
 
 Mom.exe takes a different position. The past only matters as context for now, so it never surfaces failure, never tallies omissions, and never reopens a finished block. Life interrupts plans constantly, so telling it something got in the way quietly rearranges the remainder instead of producing a lecture.
 
@@ -119,7 +119,7 @@ MODEL_API_KEY=
 | `npm test` | Vitest suite, currently 469 tests. |
 | `npm run eval` | Four synthetic personas through the live pipeline, reporting schema validity, no medical claims, no shame, and latency. |
 | `npm run check-model` | Probes NVIDIA NIM and prints `LIVE`, `EOL`, or `NOPE` per model id. |
-| `npm run test:student` | Thirty-two first person student exchanges through the real pipeline, checking intent routing, the plan contract, and her voice. Without a key it exercises the fallback path and says so instead of scoring failures. |
+| `npm run test:student` | Thirty-two first person exchanges through the real pipeline, checking intent routing, the plan contract, and her voice. Without a key it exercises the fallback path and says so instead of scoring failures. |
 | `npm run og` | Regenerates `static/og-image.png` from `static/og-image.svg`. |
 
 </details>

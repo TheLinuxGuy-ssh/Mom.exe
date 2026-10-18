@@ -6,8 +6,9 @@
 	import X from 'lucide-svelte/icons/x';
 	import LoaderCircle from 'lucide-svelte/icons/loader-circle';
 	import ListTree from 'lucide-svelte/icons/list-tree';
-	import type { Plan, PlanBlock } from '$lib/storage/types';
-	import { ACTION_LABEL, FLAG_LABEL, type Action, type Flag } from '$lib/engine/actions';
+	import type { Plan, PlanBlock, Situation } from '$lib/storage/types';
+	import { FLAG_LABEL, type Flag } from '$lib/engine/actions';
+	import { actionLabel } from '$lib/engine/situation-words';
 	import { fmtCountdown, hhmmToMin, isCurrentMinute, localDateInTz } from '$lib/engine/time';
 	import StickyNote from './StickyNote.svelte';
 	import BlockCard from './BlockCard.svelte';
@@ -20,7 +21,8 @@
 		tz,
 		marks = {},
 		busy = false,
-		onmark
+		onmark,
+		situation = undefined
 	}: {
 		plan: Plan;
 		now: Date;
@@ -28,6 +30,7 @@
 		marks: Record<string, 'yes' | 'no'>;
 		busy?: boolean;
 		onmark: (block: PlanBlock, followed: 'yes' | 'no') => void;
+		situation?: Situation;
 	} = $props();
 
 	let expanded = $state(false);
@@ -107,7 +110,7 @@
 	}
 
 	function labelOf(action: string): string {
-		return ACTION_LABEL[action as Action] ?? action;
+		return actionLabel(action, situation);
 	}
 </script>
 
@@ -273,6 +276,7 @@
 							minutesLeft={c.minutesLeft}
 							mark={marks[refOf(c.block)] ?? null}
 							onmark={(f) => onmark(c.block, f)}
+							situation={situation}
 						/>
 					{/each}
 					{#if past.length > 0}

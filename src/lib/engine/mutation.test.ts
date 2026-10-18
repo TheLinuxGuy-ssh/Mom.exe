@@ -47,7 +47,12 @@ describe('explicit requests to change the plan', () => {
 		'study at 8:30 is impossible, shift it',
 		'the 9pm block has to go',
 		'no time for the gym tonight, move it',
-		'instead of chai can i have water at 4'
+		'instead of chai can i have water at 4',
+		// the same asks in a working person's words - the noun list has to know their world too
+		'push my meeting to 11',
+		'shift my standup to noon',
+		'delay my commute till 10',
+		'cancel the meeting at 5, i am not free'
 	];
 
 	for (const note of MUST_BE_PLAN) {

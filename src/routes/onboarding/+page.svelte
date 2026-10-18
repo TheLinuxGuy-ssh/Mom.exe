@@ -7,6 +7,7 @@
 	import { getStorage } from '$lib/storage';
 	import { getSession } from '$lib/auth/session';
 	import type { MessTimings, ProfileInput, Roommates, Situation } from '$lib/storage/types';
+	import { DAY_FIELD } from '$lib/engine/situation-words';
 	import { toast } from '$lib/stores/toast';
 
 	const STEPS = ['you', 'situation', 'age', 'body', 'day', 'sleep', 'people', 'food', 'caffeine'] as const;
@@ -83,14 +84,14 @@
 		]
 	};
 
-	const DAY_STEP: Record<Situation, { title: string; hint: string; field: string }> = {
-		student_hostel: { title: 'WHEN IS CLASS?', hint: 'usual first class start time.', field: 'first class starts' },
-		student_flat: { title: 'WHEN IS CLASS?', hint: 'usual first class start time.', field: 'first class starts' },
-		student_home: { title: 'WHEN IS CLASS?', hint: 'usual first class start time.', field: 'first class starts' },
-		work_office: { title: 'WHEN DOES WORK START?', hint: 'your usual workday start. she plans around it.', field: 'workday starts' },
-		work_remote: { title: 'WHEN DOES WORK START?', hint: 'your usual workday start. she plans around it.', field: 'workday starts' },
-		own_gig: { title: 'ANY FIXED START TO THE DAY?', hint: 'a repeating commitment — call, meeting, market run. skip if nothing is fixed.', field: 'any fixed start (optional)' },
-		between_things: { title: 'ANY FIXED START TO THE DAY?', hint: 'a repeating commitment — class, work, a standing call. skip if nothing is fixed.', field: 'any fixed start (optional)' }
+	const DAY_STEP: Record<Situation, { title: string; hint: string }> = {
+		student_hostel: { title: 'WHEN IS CLASS?', hint: 'usual first class start time.' },
+		student_flat: { title: 'WHEN IS CLASS?', hint: 'usual first class start time.' },
+		student_home: { title: 'WHEN IS CLASS?', hint: 'usual first class start time.' },
+		work_office: { title: 'WHEN DOES WORK START?', hint: 'your usual workday start. she plans around it.' },
+		work_remote: { title: 'WHEN DOES WORK START?', hint: 'your usual workday start. she plans around it.' },
+		own_gig: { title: 'ANY FIXED START TO THE DAY?', hint: 'a repeating commitment — call, meeting, market run. skip if nothing is fixed.' },
+		between_things: { title: 'ANY FIXED START TO THE DAY?', hint: 'a repeating commitment — class, work, a standing call. skip if nothing is fixed.' }
 	};
 
 	const FOOD_STEP: Record<Situation, { title: string; hint: string }> = {
@@ -247,7 +248,7 @@
 					<input class="field" inputmode="numeric" placeholder="weight kg (optional)" bind:value={weightText} />
 				</div>
 			{:else if step === 4}
-				<label class="text-xs font-black uppercase tracking-widest text-brown block space-y-1.5">{DAY_STEP[draft.situation].field}
+				<label class="text-xs font-black uppercase tracking-widest text-brown block space-y-1.5">{DAY_FIELD[draft.situation]}
 					<input type="time" class="field" bind:value={draft.class_start} />
 				</label>
 				{#if draft.situation === 'own_gig' || draft.situation === 'between_things'}

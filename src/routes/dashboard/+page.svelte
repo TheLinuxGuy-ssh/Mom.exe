@@ -5,6 +5,7 @@
 	import Settings from 'lucide-svelte/icons/settings';
 	import LogOut from 'lucide-svelte/icons/log-out';
 	import type { Checkin, Message, Plan, PlanBlock, Profile } from '$lib/storage/types';
+	import { situOf } from '$lib/storage/types';
 	import { getStorage } from '$lib/storage';
 	import { getSession, clearSession } from '$lib/auth/session';
 	import { getAuthToken, getSessionUser, signOut as supabaseSignOut } from '$lib/auth/supabase';
@@ -607,7 +608,7 @@ import CatVisit from '$lib/components/CatVisit.svelte';
 					note="open-weight models think for 10-25s before answering. if it takes too long, i plan in code instead and you still get a real plan."
 				/>
 			{:else if plan}
-				<Timeline {plan} {now} tz={profile.timezone} {marks} busy={busy} onmark={markBlock} />
+				<Timeline {plan} {now} tz={profile.timezone} {marks} busy={busy} onmark={markBlock} situation={situOf(profile.situation)} />
 			{:else}
 				<div class="grid place-items-center gap-4 py-8 text-center">
 					<Mascot size={220} labels={false} />
