@@ -33,7 +33,7 @@
 		situation?: Situation;
 	} = $props();
 
-	let expanded = $state(false);
+	let expanded = $state(true);
 	let showWhy = $state(false);
 	let showPast = $state(false);
 	let view = $state<'plain' | 'code'>('plain');
