@@ -26,7 +26,7 @@
 <section class="w-[min(1180px,calc(100%-2rem))] mx-auto grid lg:grid-cols-[1.05fr_0.95fr] gap-10 items-center pt-6 lg:min-h-[70dvh]">
 	<div class="pb-14">
 		<p class="text-[0.78rem] font-black uppercase tracking-[0.18em] text-brown mb-3">for anyone</p>
-		<h1 class="font-display uppercase leading-[0.88] tracking-tighter max-w-[9ch] text-[clamp(3.5rem,13vw,10rem)]"
+		<h1 class="font-display uppercase leading-[0.88] tracking-tighter max-w-[9ch] text-[clamp(2.5rem,11vw,7rem)] mr-17"
 			style="text-shadow: 5px 5px 0 var(--color-pink), 10px 10px 0 var(--color-blue)">
 			Adulting
 		</h1>
