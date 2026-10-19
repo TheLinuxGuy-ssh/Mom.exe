@@ -6,6 +6,7 @@
 	import ArrowRight from 'lucide-svelte/icons/arrow-right';
 	import LoaderCircle from 'lucide-svelte/icons/loader-circle';
 	import MousePointerClick from 'lucide-svelte/icons/mouse-pointer-click';
+	import RefreshCw from 'lucide-svelte/icons/refresh-cw';
 	import { getSession, setSession, clearSession, isHosted, localEmailId } from '$lib/auth/session';
 	import { sendOtp, verifyOtpEmail, consumeUrlToken, onAuthEvent, getSessionUser } from '$lib/auth/supabase';
 	import { getStorage } from '$lib/storage';
@@ -22,12 +23,18 @@
 	let finished = false;
 	let resendTimer: ReturnType<typeof setInterval> | null = null;
 
+	// Cross-tab sync: when another tab completes magic link login, this tab hears it and redirects
+	const authChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('mom-auth') : null;
+
 	function clearResendTimer(): void {
 		if (resendTimer) clearInterval(resendTimer);
 		resendTimer = null;
 	}
 
-	onDestroy(clearResendTimer);
+	onDestroy(() => {
+		clearResendTimer();
+		authChannel?.close();
+	});
 
 	onMount(() => {
 		if (getSession()) {
@@ -38,13 +45,23 @@
 
 		const cleanup = onAuthEvent((_event, session) => {
 			if (!session) return;
-			// capture the user now, finish the login outside the callback. finishLogin reads the
-			// profile, which reads the auth token, and calling back into the auth client from
-			// inside onAuthStateChange can deadlock: the student then sits on this screen forever
-			// with no error and no way forward.
 			const { id, email: userEmail } = session.user;
 			queueMicrotask(() => void finishLogin(id, userEmail ?? email));
 		});
+
+		// Listen for cross-tab login completion
+		if (authChannel) {
+			authChannel.onmessage = (event) => {
+				if (event.data === 'login-complete') {
+					void consumeUrlToken().then(async (ok) => {
+						if (ok) {
+							const user = await getSessionUser();
+							if (user) await finishLogin(user.id, user.email ?? email);
+						}
+					});
+				}
+			};
+		}
 
 		void consumeUrlToken()
 			.then(async (ok) => {
@@ -53,7 +70,6 @@
 				if (user) await finishLogin(user.id, user.email ?? email);
 			})
 			.catch(() => {
-				// an expired or already-used link lands here. the student can still type a code
 				toast('that link did not work. request a new one.', 'warn');
 			});
 
@@ -64,6 +80,8 @@
 		if (finished) return;
 		finished = true;
 		setSession({ userId, email: userEmail || email, mode: 'supabase' });
+		// Notify other tabs that login is complete
+		authChannel?.postMessage('login-complete');
 		try {
 			const profile = await getStorage().getProfile(userId);
 			await goto(profile ? '/dashboard' : '/onboarding');
@@ -84,8 +102,6 @@
 				await sendOtp(trimmed);
 				stage = 'sent';
 				resendIn = 60;
-				// tracked so it can be cleared on unmount. left running it kept ticking a counter
-				// for a page nobody was looking at, and stacked a second one on every resend
 				clearResendTimer();
 				resendTimer = setInterval(() => {
 					resendIn--;
@@ -98,6 +114,23 @@
 			}
 		} catch (e) {
 			toast(e instanceof Error ? e.message : 'something went wrong', 'warn');
+		} finally {
+			busy = false;
+		}
+	}
+
+	async function checkMagicLink(): Promise<void> {
+		busy = true;
+		try {
+			const ok = await consumeUrlToken();
+			if (ok) {
+				const user = await getSessionUser();
+				if (user) await finishLogin(user.id, user.email ?? email);
+			} else {
+				toast('no valid link found yet. check your inbox or try again.', 'warn');
+			}
+		} catch (e) {
+			toast(e instanceof Error ? e.message : 'could not check', 'warn');
 		} finally {
 			busy = false;
 		}
@@ -181,6 +214,15 @@
 					<span class="leading-snug">we sent a magic link to <strong>{email}</strong>. tap it in your email and you'll be signed in automatically.</span>
 				</div>
 				<div class="border-t-2 border-ink/10 pt-4 space-y-3">
+					<button
+						type="button"
+						class="btn !rounded-xl w-full py-3 text-sm font-black uppercase flex items-center justify-center gap-2"
+						disabled={busy}
+						onclick={checkMagicLink}
+					>
+						{#if busy}<LoaderCircle class="w-4 h-4 animate-spin" />{/if}
+						<RefreshCw class="w-4 h-4" /> i clicked the link, check now
+					</button>
 					<button
 						type="button"
 						class="btn !rounded-xl w-full py-3 text-sm font-black uppercase flex items-center justify-center gap-2"
