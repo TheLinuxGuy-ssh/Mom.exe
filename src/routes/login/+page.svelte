@@ -6,34 +6,43 @@
 	import ArrowRight from 'lucide-svelte/icons/arrow-right';
 	import LoaderCircle from 'lucide-svelte/icons/loader-circle';
 	import MousePointerClick from 'lucide-svelte/icons/mouse-pointer-click';
-	import RefreshCw from 'lucide-svelte/icons/refresh-cw';
+	import CheckCircle from 'lucide-svelte/icons/check-circle';
 	import { getSession, setSession, clearSession, isHosted, localEmailId } from '$lib/auth/session';
-	import { sendOtp, verifyOtpEmail, consumeUrlToken, onAuthEvent, getSessionUser } from '$lib/auth/supabase';
+	import { sendOtp, verifyOtpEmail, consumeUrlToken, onAuthEvent, getSessionUser, getSupabase } from '$lib/auth/supabase';
 	import { getStorage } from '$lib/storage';
 	import { toast } from '$lib/stores/toast';
 
 	let email = $state('');
 	let code = $state('');
 	// 'email' = waiting for user to enter email
-	// 'sent' = magic link sent, waiting for user to click it (or code as fallback)
+	// 'waiting' = magic link sent, polling for session
 	// 'code' = user explicitly chose to enter a code instead
-	let stage = $state<'email' | 'sent' | 'code'>('email');
+	let stage = $state<'email' | 'waiting' | 'code'>('email');
 	let busy = $state(false);
 	let resendIn = $state(0);
 	let finished = false;
 	let resendTimer: ReturnType<typeof setInterval> | null = null;
+	let pollTimer: ReturnType<typeof setInterval> | null = null;
 
-	// Cross-tab sync: when another tab completes magic link login, this tab hears it and redirects
-	const authChannel = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('mom-auth') : null;
+	// Detect if this tab was opened via magic link (has token params)
+	const isMagicLinkTab = (): boolean => {
+		const params = new URLSearchParams(window.location.search);
+		return params.has('token_hash') || params.has('code') || window.location.hash.includes('access_token');
+	};
 
 	function clearResendTimer(): void {
 		if (resendTimer) clearInterval(resendTimer);
 		resendTimer = null;
 	}
 
+	function clearPollTimer(): void {
+		if (pollTimer) clearInterval(pollTimer);
+		pollTimer = null;
+	}
+
 	onDestroy(() => {
 		clearResendTimer();
-		authChannel?.close();
+		clearPollTimer();
 	});
 
 	onMount(() => {
@@ -43,45 +52,41 @@
 		}
 		if (!isHosted()) return;
 
+		// If this tab was opened via magic link, just verify and show confirmed
+		if (isMagicLinkTab()) {
+			void handleMagicLinkTab();
+			return;
+		}
+
+		// Normal tab: listen for auth state changes (e.g. returning user)
 		const cleanup = onAuthEvent((_event, session) => {
 			if (!session) return;
 			const { id, email: userEmail } = session.user;
 			queueMicrotask(() => void finishLogin(id, userEmail ?? email));
 		});
 
-		// Listen for cross-tab login completion
-		if (authChannel) {
-			authChannel.onmessage = (event) => {
-				if (event.data === 'login-complete') {
-					void consumeUrlToken().then(async (ok) => {
-						if (ok) {
-							const user = await getSessionUser();
-							if (user) await finishLogin(user.id, user.email ?? email);
-						}
-					});
-				}
-			};
-		}
-
-		void consumeUrlToken()
-			.then(async (ok) => {
-				if (!ok) return;
-				const user = await getSessionUser();
-				if (user) await finishLogin(user.id, user.email ?? email);
-			})
-			.catch(() => {
-				toast('that link did not work. request a new one.', 'warn');
-			});
-
 		return cleanup;
 	});
+
+	async function handleMagicLinkTab(): Promise<void> {
+		busy = true;
+		try {
+			const ok = await consumeUrlToken();
+			if (!ok) {
+				toast('that link did not work. request a new one.', 'warn');
+			}
+		} catch {
+			toast('that link did not work. request a new one.', 'warn');
+		} finally {
+			busy = false;
+		}
+	}
 
 	async function finishLogin(userId: string, userEmail: string): Promise<void> {
 		if (finished) return;
 		finished = true;
+		clearPollTimer();
 		setSession({ userId, email: userEmail || email, mode: 'supabase' });
-		// Notify other tabs that login is complete
-		authChannel?.postMessage('login-complete');
 		try {
 			const profile = await getStorage().getProfile(userId);
 			await goto(profile ? '/dashboard' : '/onboarding');
@@ -100,13 +105,15 @@
 		try {
 			if (isHosted()) {
 				await sendOtp(trimmed);
-				stage = 'sent';
+				stage = 'waiting';
 				resendIn = 60;
 				clearResendTimer();
 				resendTimer = setInterval(() => {
 					resendIn--;
 					if (resendIn <= 0) clearResendTimer();
 				}, 1000);
+				// Start polling for session
+				startPolling();
 				toast('sent! check your inbox for a magic link');
 			} else {
 				setSession({ userId: localEmailId(trimmed), email: trimmed, mode: 'local' });
@@ -119,24 +126,22 @@
 		}
 	}
 
-	async function checkMagicLink(): Promise<void> {
-		busy = true;
-		try {
-			const ok = await consumeUrlToken();
-			if (ok) {
-				const user = await getSessionUser();
-				if (user) await finishLogin(user.id, user.email ?? email);
-			} else {
-				toast('no valid link found yet. check your inbox or try again.', 'warn');
+	function startPolling(): void {
+		clearPollTimer();
+		pollTimer = setInterval(async () => {
+			if (!isHosted()) return;
+			const supabase = getSupabase();
+			if (!supabase) return;
+			const { data } = await supabase.auth.getSession();
+			if (data.session) {
+				clearPollTimer();
+				await finishLogin(data.session.user.id, data.session.user.email ?? email);
 			}
-		} catch (e) {
-			toast(e instanceof Error ? e.message : 'could not check', 'warn');
-		} finally {
-			busy = false;
-		}
+		}, 2500);
 	}
 
 	function switchToCodeEntry(): void {
+		clearPollTimer();
 		stage = 'code';
 	}
 
@@ -182,7 +187,23 @@
 			</p>
 		</div>
 
-		{#if stage === 'email'}
+		{#if isMagicLinkTab()}
+			<!-- Tab B: Magic link landing page - just confirms, no redirect -->
+			<div class="card p-8 text-center space-y-4">
+				<div class="mx-auto w-16 h-16 rounded-full bg-lime/20 flex items-center justify-center">
+					<CheckCircle class="w-8 h-8 text-lime" />
+				</div>
+				<h2 class="font-display text-2xl uppercase tracking-tight">Confirmed!</h2>
+				<p class="text-mute leading-relaxed max-w-xs mx-auto">
+					You're signed in. You can close this tab and return to the original window.
+				</p>
+				{#if busy}
+					<LoaderCircle class="w-6 h-6 animate-spin mx-auto text-ink/40" />
+				{/if}
+			</div>
+
+		{:else if stage === 'email'}
+			<!-- Stage 1: Enter email -->
 			<div class="card p-5 space-y-3">
 				<label class="text-xs font-black uppercase tracking-widest text-brown flex items-center gap-1.5">
 					<Mail class="w-3.5 h-3.5" /> email
@@ -207,22 +228,18 @@
 				</button>
 			</div>
 
-		{:else if stage === 'sent'}
-			<div class="card p-5 space-y-4">
+		{:else if stage === 'waiting'}
+			<!-- Stage 2: Waiting for magic link - polling for session -->
+			<div class="card p-6 space-y-4">
 				<div class="flex items-center gap-2 text-sm font-bold text-mute">
 					<MousePointerClick class="w-4 h-4 shrink-0" />
-					<span class="leading-snug">we sent a magic link to <strong>{email}</strong>. tap it in your email and you'll be signed in automatically.</span>
+					<span class="leading-snug">we sent a magic link to <strong>{email}</strong>. click the link in your email — this page will redirect automatically.</span>
+				</div>
+				<div class="flex items-center justify-center gap-3 py-4">
+					<LoaderCircle class="w-8 h-8 animate-spin text-orange" />
+					<span class="text-sm font-semibold text-ink/60">waiting for you to click the link…</span>
 				</div>
 				<div class="border-t-2 border-ink/10 pt-4 space-y-3">
-					<button
-						type="button"
-						class="btn !rounded-xl w-full py-3 text-sm font-black uppercase flex items-center justify-center gap-2"
-						disabled={busy}
-						onclick={checkMagicLink}
-					>
-						{#if busy}<LoaderCircle class="w-4 h-4 animate-spin" />{/if}
-						<RefreshCw class="w-4 h-4" /> i clicked the link, check now
-					</button>
 					<button
 						type="button"
 						class="btn !rounded-xl w-full py-3 text-sm font-black uppercase flex items-center justify-center gap-2"
@@ -247,6 +264,7 @@
 			</div>
 
 		{:else}
+			<!-- Stage 3: Code entry fallback -->
 			<div class="card p-5 space-y-4">
 				<div class="flex items-center gap-2 text-sm font-bold text-mute">
 					<KeyRound class="w-4 h-4 shrink-0" />
@@ -286,7 +304,7 @@
 						>
 							{resendIn > 0 ? `resend in ${resendIn}s` : 'send new code'}
 						</button>
-						<button type="button" class="underline cursor-pointer" onclick={() => (stage = 'sent')}>
+						<button type="button" class="underline cursor-pointer" onclick={() => (stage = 'waiting')}>
 							back to magic link
 						</button>
 					</div>
@@ -295,9 +313,6 @@
 		{/if}
 
 		<div class="text-center space-y-2">
-			<!-- <button type="button" class="text-sm font-black text-brown underline cursor-pointer" onclick={goLocal}>
-				or skip all this and use this browser directly
-			</button> -->
 			<p class="text-[11px] font-semibold text-mute leading-relaxed max-w-xs mx-auto">
 				Mom.exe is a wellness coach, not medical advice. hosted mode sends anonymized context to an
 				open-weight model; local mode keeps everything on your machine.
