@@ -1,5 +1,30 @@
 @import 'tailwindcss';
 
+/* Local font faces */
+@font-face {
+	font-family: 'Archivo Black';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('/fonts/archivo-black.woff2') format('woff2');
+}
+
+@font-face {
+	font-family: 'Inter';
+	font-style: normal;
+	font-weight: 400 900;
+	font-display: swap;
+	src: url('/fonts/inter-var.woff2') format('woff2');
+}
+
+@font-face {
+	font-family: 'Caveat';
+	font-style: normal;
+	font-weight: 400 700;
+	font-display: swap;
+	src: url('/fonts/caveat-var.woff2') format('woff2');
+}
+
 @theme {
 	--color-ink: #211713;
 	--color-cream: #fff4dc;

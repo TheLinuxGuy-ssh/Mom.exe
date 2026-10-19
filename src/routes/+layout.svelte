@@ -34,7 +34,7 @@
 	</defs>
 </svg>
 
-{@render children()}
+<main>{@render children()}</main>
 
 <div class="noise" aria-hidden="true"></div>
 <Toast />

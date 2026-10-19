@@ -28,12 +28,10 @@
 		<meta name="twitter:description" content="An open-weight AI wellness coach for anyone adulting on their own. Plans sleep, meals and the rest of your day. No streaks, no guilt." />
 		<meta name="twitter:image" content="https://momexe.vercel.app/og-image.png" />
 
-		<link rel="preconnect" href="https://fonts.googleapis.com" />
-		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-		<link
-			href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Inter:wght@400;500;600;700;800;900&family=Caveat:wght@400;600;700&display=swap"
-			rel="stylesheet"
-		/>
+		<!-- Local font preloads -->
+		<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/archivo-black.woff2" />
+		<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/inter-var.woff2" />
+		<link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/caveat-var.woff2" />
 		<title>Mom.exe — your mom, but as an executable</title>
 		%sveltekit.head%
 	</head>
