@@ -13,7 +13,10 @@
 
 	let email = $state('');
 	let code = $state('');
-	let stage = $state<'email' | 'code'>('email');
+	// 'email' = waiting for user to enter email
+	// 'sent' = magic link sent, waiting for user to click it (or code as fallback)
+	// 'code' = user explicitly chose to enter a code instead
+	let stage = $state<'email' | 'sent' | 'code'>('email');
 	let busy = $state(false);
 	let resendIn = $state(0);
 	let finished = false;
@@ -79,7 +82,7 @@
 		try {
 			if (isHosted()) {
 				await sendOtp(trimmed);
-				stage = 'code';
+				stage = 'sent';
 				resendIn = 60;
 				// tracked so it can be cleared on unmount. left running it kept ticking a counter
 				// for a page nobody was looking at, and stacked a second one on every resend
@@ -88,7 +91,7 @@
 					resendIn--;
 					if (resendIn <= 0) clearResendTimer();
 				}, 1000);
-				toast('sent. check your inbox (and spam, honestly)');
+				toast('sent! check your inbox for a magic link');
 			} else {
 				setSession({ userId: localEmailId(trimmed), email: trimmed, mode: 'local' });
 				goto('/onboarding');
@@ -98,6 +101,10 @@
 		} finally {
 			busy = false;
 		}
+	}
+
+	function switchToCodeEntry(): void {
+		stage = 'code';
 	}
 
 	async function confirm(): Promise<void> {
@@ -130,12 +137,12 @@
 <div class="min-h-[80dvh] grid place-items-center px-4 py-10">
 	<div class="w-full max-w-md space-y-6">
 		<div class="text-center">
-			<h1 class="font-display text-5xl tracking-tighter uppercase" style="text-shadow: 4px 4px 0 var(--color-pink), 8px 8px 0 var(--color-blue)">
+			<h1 class="font-display text-4xl sm:text-5xl tracking-tighter uppercase" style="text-shadow: 4px 4px 0 var(--color-pink), 8px 8px 0 var(--color-blue)">
 				Welcome back?
 			</h1>
-			<p class="text-sm font-semibold text-mute mt-2">
+			<p class="text-sm font-semibold text-mute mt-2 sm:text-base">
 				{#if isHosted()}
-					one email, no passwords. tap the button in the email, or type the code if it shows one.
+					one email, no passwords. we'll send a magic link to sign you in.
 				{:else}
 					demo mode: your data stays in this browser. no email sent, promise.
 				{/if}
@@ -153,6 +160,7 @@
 					placeholder="you@adulting.life"
 					bind:value={email}
 					onkeydown={(e) => e.key === 'Enter' && void start()}
+					autocomplete="email"
 				/>
 				<button
 					type="button"
@@ -165,15 +173,46 @@
 					<ArrowRight class="w-4 h-4" />
 				</button>
 			</div>
-		{:else}
+
+		{:else if stage === 'sent'}
 			<div class="card p-5 space-y-4">
 				<div class="flex items-center gap-2 text-sm font-bold text-mute">
 					<MousePointerClick class="w-4 h-4 shrink-0" />
-					<span class="leading-snug">the easiest way: open the email on this device and tap the button. this page catches you automatically.</span>
+					<span class="leading-snug">we sent a magic link to <strong>{email}</strong>. tap it in your email and you'll be signed in automatically.</span>
+				</div>
+				<div class="border-t-2 border-ink/10 pt-4 space-y-3">
+					<button
+						type="button"
+						class="btn !rounded-xl w-full py-3 text-sm font-black uppercase flex items-center justify-center gap-2"
+						onclick={switchToCodeEntry}
+					>
+						<KeyRound class="w-4 h-4" /> didn't get the link? enter a code instead
+					</button>
+					<div class="flex items-center justify-between text-xs font-bold text-mute">
+						<button
+							type="button"
+							class="underline cursor-pointer disabled:opacity-50 disabled:no-underline"
+							disabled={resendIn > 0 || busy}
+							onclick={() => void start()}
+						>
+							{resendIn > 0 ? `resend in ${resendIn}s` : 'send link again'}
+						</button>
+						<button type="button" class="underline cursor-pointer" onclick={() => (stage = 'email')}>
+							wrong email?
+						</button>
+					</div>
+				</div>
+			</div>
+
+		{:else}
+			<div class="card p-5 space-y-4">
+				<div class="flex items-center gap-2 text-sm font-bold text-mute">
+					<KeyRound class="w-4 h-4 shrink-0" />
+					<span class="leading-snug">enter the 6-digit code from your email.</span>
 				</div>
 				<div class="border-t-2 border-ink/10 pt-4 space-y-3">
 					<label class="text-xs font-black uppercase tracking-widest text-brown flex items-center gap-1.5">
-						<KeyRound class="w-3.5 h-3.5" /> or enter the code from your email, digits only
+						<KeyRound class="w-3.5 h-3.5" /> code
 					</label>
 					<input
 						type="text"
@@ -203,10 +242,10 @@
 							disabled={resendIn > 0 || busy}
 							onclick={() => void start()}
 						>
-							{resendIn > 0 ? `resend in ${resendIn}s` : 'send it again'}
+							{resendIn > 0 ? `resend in ${resendIn}s` : 'send new code'}
 						</button>
-						<button type="button" class="underline cursor-pointer" onclick={() => (stage = 'email')}>
-							wrong email?
+						<button type="button" class="underline cursor-pointer" onclick={() => (stage = 'sent')}>
+							back to magic link
 						</button>
 					</div>
 				</div>

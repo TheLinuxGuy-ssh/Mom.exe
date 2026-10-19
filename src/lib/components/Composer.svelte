@@ -4,8 +4,6 @@
 	import X from 'lucide-svelte/icons/x';
 	import LoaderCircle from 'lucide-svelte/icons/loader-circle';
 	import { heuristicExtract, DISTURBANCE_LABEL } from '$lib/engine/extract';
-	import type { QuickBand } from '$lib/storage/types';
-	import GooeyToggle from './GooeyToggle.svelte';
 	import {
 		emptyNoteMessage,
 		hasSomethingToSend,
@@ -21,12 +19,11 @@
 		onsubmit
 	}: {
 		busy?: boolean;
-		onsubmit: (payload: { text: string; quick: QuickBand | null; removedKeys: string[] }) => Promise<boolean>;
+		onsubmit: (payload: { text: string; quick: string | null; removedKeys: string[] }) => Promise<boolean>;
 	} = $props();
 
 	let textarea = $state<HTMLTextAreaElement | null>(null);
 	let text = $state('');
-	let quick: QuickBand | null = $state(null);
 	let focused = $state(false);
 	let removed = $state<string[]>([]);
 	let debounced = $state('');
@@ -116,18 +113,17 @@
 		// model round trip, and answered a question nobody had asked. The button is deliberately
 		// still pressable rather than dead, because a dead button explains nothing — pressing it
 		// tells you what it wanted.
-		if (!hasSomethingToSend(text, quick)) {
+		if (!hasSomethingToSend(text, null)) {
 			toast(emptyNoteMessage(), 'warn');
 			textarea?.focus();
 			return;
 		}
 		// too short to be worth her time is not an error, it is just not ready yet
 		if (text.trim().length > 0 && !noteReady(text)) return;
-		const ok = await onsubmit({ text, quick, removedKeys: removed });
+		const ok = await onsubmit({ text, quick: null, removedKeys: removed });
 		if (ok) {
 			text = '';
 			debounced = '';
-			quick = null;
 			removed = [];
 		}
 	}
@@ -135,7 +131,7 @@
 	function onKeyDown(e: KeyboardEvent): void {
 		// a bare Enter on an empty box is the same mistake as pressing the button, so it gets the
 		// same answer rather than silence
-		if (e.key === 'Enter' && !e.shiftKey && hasSomethingToSend(text, quick)) {
+		if (e.key === 'Enter' && !e.shiftKey && hasSomethingToSend(text, null)) {
 			e.preventDefault();
 			void submit();
 			return;
@@ -149,22 +145,9 @@
 
 <div class="w-full max-w-2xl mx-auto transition-transform duration-200 {focused ? 'rotate-0' : '-rotate-[1.2deg]'}">
 	<div class="card !rounded-2xl p-4 sm:p-5">
-		<div class="flex items-center justify-between gap-3 mb-3">
-			<div class="flex items-center gap-2 text-brown">
-				<NotebookPen class="w-4 h-4" />
-				<span class="text-xs font-black uppercase tracking-[0.18em]">Write mom a note</span>
-			</div>
-			<div class="w-44 sm:w-52 border-2 border-ink rounded-full overflow-hidden bg-paper">
-				<GooeyToggle
-					options={[
-						{ value: 'rough', label: 'rough' },
-						{ value: 'okay', label: 'okay' },
-						{ value: 'great', label: 'great' }
-					]}
-					value={quick}
-					onchange={(v) => (quick = v as QuickBand | null)}
-				/>
-			</div>
+		<div class="flex items-center gap-2 text-brown mb-3">
+			<NotebookPen class="w-4 h-4" />
+			<span class="text-xs font-black uppercase tracking-[0.18em]">Write mom a note</span>
 		</div>
 
 		<textarea

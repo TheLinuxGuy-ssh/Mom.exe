@@ -117,12 +117,6 @@ describe('refusing an empty submission', () => {
 		expect(hasSomethingToSend('…', null)).toBe(false);
 	});
 
-	it('accepts a quick band on its own, because that is a real answer', () => {
-		expect(hasSomethingToSend('', 'rough')).toBe(true);
-		expect(hasSomethingToSend('   ', 'great')).toBe(true);
-		expect(hasSomethingToSend('', '  ')).toBe(false);
-	});
-
 	it('accepts anything with a word in it', () => {
 		expect(hasSomethingToSend('ok', null)).toBe(true);
 		expect(hasSomethingToSend('idk', null)).toBe(true);

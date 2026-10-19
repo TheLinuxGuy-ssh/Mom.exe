@@ -202,11 +202,11 @@
 
 <div class="min-h-[80dvh] px-4 py-10">
 	<div class="w-full max-w-lg mx-auto space-y-6">
-		<div class="flex items-center justify-center gap-1.5">
+		<div class="flex items-center justify-center gap-1.5 sm:gap-2 overflow-x-auto pb-2">
 			{#each STEPS as s, i}
 				<button
 					type="button"
-					class="w-2.5 h-2.5 rounded-full border-2 border-ink cursor-pointer transition-transform {i === step ? 'bg-orange scale-125' : i < step ? 'bg-ink' : 'bg-paper'}"
+					class="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-full border-2 border-ink cursor-pointer transition-transform flex-shrink-0 {i === step ? 'bg-orange scale-125' : i < step ? 'bg-ink' : 'bg-paper'}"
 					aria-label={s}
 					onclick={() => (step = i)}
 				></button>

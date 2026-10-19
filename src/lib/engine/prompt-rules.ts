@@ -56,11 +56,9 @@ export function readyLabel(hour: number): string {
  * model, burned a full planning round trip, and answered a question nobody asked. The button's own
  * idle label invited it, which is worse.
  *
- * A quick band counts on its own, because choosing "rough" over three words is a real answer about
- * the day. Whitespace, and punctuation typed by someone who hit enter without thinking, do not.
+ * Now only text counts - the quick band toggle was removed.
  */
 export function hasSomethingToSend(text: string, quick: string | null): boolean {
-	if (quick !== null && quick.trim() !== '') return true;
 	const t = text.trim();
 	if (t === '') return false;
 	return !/^[\s.!?…]+$/.test(t);
@@ -68,7 +66,7 @@ export function hasSomethingToSend(text: string, quick: string | null): boolean 
 
 /** Why the press did nothing, in her voice rather than the browser's. */
 export function emptyNoteMessage(): string {
-	return 'nothing to read, love. write something first, or pick rough/okay/great.';
+	return 'nothing to read, love. write something first.';
 }
 
 /**
